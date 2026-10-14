@@ -50,7 +50,7 @@ npm run build
 
 A CI executa essas verificações no Linux. Alguns testes originais dependem de permissões e caminhos Unix; execute a suíte completa no Linux ou WSL ao trabalhar no Windows.
 
-Após aprovação, aumente a versão, escreva as notas no `CHANGELOG.md` e publique a partir da `main` limpa e sincronizada:
+Após aprovação, aumente a versão com `npm version patch --no-git-tag-version` (ou `minor`). O comando sincroniza também os manifests das integrações locais herdadas do Habblaud. Escreva as notas no `CHANGELOG.md` e publique a partir da `main` limpa e sincronizada:
 
 ```powershell
 npm run release -- --dry-run
