@@ -9,7 +9,7 @@ const win = { utilization: 42, resetsAt: 10 * 60 * MIN };
 
 describe('sourceLabel', () => {
   it('diz quem gravou o uso ao vivo', () => {
-    expect(sourceLabel({ source: 'statusline', via: 'mod', fetchedAt: 0 })).toBe('ao vivo (mod do Habblaud)');
+    expect(sourceLabel({ source: 'statusline', via: 'mod', fetchedAt: 0 })).toBe('ao vivo (mod do Dissero)');
     expect(sourceLabel({ source: 'statusline', via: 'tap', fetchedAt: 0 })).toBe('ao vivo (statusline do Claude Code)');
     expect(sourceLabel({ source: 'statusline', fetchedAt: 0 })).toBe('ao vivo (statusline do Claude Code)');
     expect(sourceLabel({ source: 'cache', fetchedAt: 0 })).toBe('cache do /usage do Claude Code');
@@ -42,7 +42,7 @@ describe('cartão de uso de uma conta do Codex', () => {
     expect(usageMessage(codex())).toEqual(['sem dados ainda', 'sem dados']);
     expect(codexUsageNote(codex(), 0)).toBe('Não precisa instalar nada: os números chegam com a próxima sessão do Codex.');
     expect(usageSubtitle(codex())).toBe('plano Team');
-    expect(usageSubtitle(codex({ plan: undefined }))).toBe('Codex');
+    expect(usageSubtitle(codex({ plan: undefined }))).toBe('ChatGPT');
     // Claude Code: como antes.
     expect(usageMessage({ usageStatus: 'disabled' })).toEqual(['sem dados de uso', 'sem dados']);
     expect(usageSubtitle({ email: 'a@b.c', configDir: '~/.claude' })).toBe('a@b.c');

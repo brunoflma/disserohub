@@ -49,6 +49,36 @@ export function isPresent(agent: Pick<AgentInfo, 'status'>): boolean {
   return agent.status !== 'offline';
 }
 
+/** Trabalho em andamento inclui pedidos de resposta e comandos ainda rodando. */
+export function isSessionActive(agent: Pick<AgentInfo, 'status'>): boolean {
+  return agent.status === 'working' || agent.status === 'waiting' || agent.status === 'shell';
+}
+
+/** Rótulo explícito do turno; uma sessão aberta pode já ter concluído seu último turno. */
+export function sessionStateLabel(agent: AgentInfo, agents: readonly AgentInfo[] = []): string {
+  switch (agent.status) {
+    case 'working': return 'Em andamento';
+    case 'waiting': return 'Aguardando você';
+    case 'shell': return 'Comando em execução';
+    case 'done': return 'Concluída';
+    case 'offline': return 'Encerrada';
+    case 'idle': {
+      const seen = new Set([agent.id]);
+      const queue = [agent.id];
+      while (queue.length) {
+        const parent = queue.shift()!;
+        for (const sub of agents) {
+          if (sub.parentId !== parent || seen.has(sub.id)) continue;
+          if (isSessionActive(sub)) return 'Subagentes ativos';
+          seen.add(sub.id);
+          queue.push(sub.id);
+        }
+      }
+      return agent.activity?.kind === 'done' ? 'Concluída' : 'Aguardando instruções';
+    }
+  }
+}
+
 export interface Counters {
   rooms: number;
   /** Agentes presentes (principais + subagentes, exceto os que estão saindo). */
@@ -224,35 +254,35 @@ export interface ShellStageInfo {
 
 const MIN = 60_000;
 
-/** As fases da espera no escritório (a "escalada cômica"), pela idade do shell mais antigo. */
+/** Duration buckets keep their legacy IDs; descriptions match the legal office. */
 export const SHELL_STAGES: readonly ShellStageInfo[] = [
   {
     stage: 'popcorn',
     from: 0,
-    emoji: '🍿',
-    text: tr('Comendo pipoca e assistindo ao terminal'),
-    help: tr('Até 3 min: recosta na cadeira com um balde de pipoca e assiste ao terminal como se fosse um filme.'),
+    emoji: '⏳',
+    text: tr('Aguardando o comando enquanto consulta documentos'),
+    help: tr('O agente permanece na mesa enquanto o comando é executado.'),
   },
   {
     stage: 'spin',
     from: 3 * MIN,
-    emoji: '🪑',
-    text: tr('A pipoca acabou: girando na cadeira'),
-    help: tr('De 3 a 10 min: a pipoca acaba; braços cruzados, dedos batendo e, de vez em quando, um giro completo na cadeira.'),
+    emoji: '⏳',
+    text: tr('Comando em execução há mais de 3 minutos'),
+    help: tr('A execução continua. Os detalhes mostram o comando e o tempo de espera.'),
   },
   {
     stage: 'cobweb',
     from: 10 * MIN,
-    emoji: '🕸️',
-    text: tr('Já tem teia de aranha na cadeira'),
-    help: tr('Depois de 10 min: aparece uma teia de aranha na cadeira (ela cresce depois de 20 min) e escapa um bocejo.'),
+    emoji: '⏳',
+    text: tr('Comando em execução há mais de 10 minutos'),
+    help: tr('A consulta de documentos representa a espera. Verifique os detalhes do comando.'),
   },
   {
     stage: 'nap',
     from: 25 * MIN,
-    emoji: '😴',
-    text: tr('Cochilou esperando o shell'),
-    help: tr('Depois de 25 min: cochila na mesa, coberto de teia.'),
+    emoji: '⏳',
+    text: tr('Comando em execução há mais de 25 minutos'),
+    help: tr('O tempo informa a duração da espera, preservando o estado real da sessão.'),
   },
 ];
 
@@ -298,6 +328,8 @@ export interface AgentFilter {
   query: string;
   /** Contas ocultas (AccountInfo.id). */
   hiddenAccounts: ReadonlySet<string>;
+  /** Lista lateral: por padrão mostra só trabalho em andamento, com os pais como contexto. */
+  sessions?: 'active' | 'all';
 }
 
 export interface AgentNode {
@@ -361,7 +393,8 @@ export function groupRooms(snap: Pick<OfficeSnapshot, 'rooms' | 'agents' | 'acco
   const accountOrder = new Map(snap.accounts.map((a, i) => [a.id, i]));
   const query = filter?.query.trim() ?? '';
   const hidden = filter?.hiddenAccounts ?? new Set<string>();
-  const filtering = query.length > 0 || hidden.size > 0;
+  const filtering = query.length > 0 || hidden.size > 0 || !!filter?.sessions;
+  const matchesStatus = (a: AgentInfo) => filter?.sessions !== 'active' || isSessionActive(a);
 
   const byRoom = new Map<string, AgentInfo[]>();
   for (const a of snap.agents) {
@@ -391,13 +424,16 @@ export function groupRooms(snap: Pick<OfficeSnapshot, 'rooms' | 'agents' | 'acco
     let matches = 0;
     for (const a of top) {
       const subs = subsOf.get(a.id) ?? [];
-      const selfVisible = visible(a);
-      const visibleSubs = selfVisible ? subs.filter((s) => !hidden.has(s.account)) : subs.filter(visible);
+      const selfMatches = visible(a);
+      const selfVisible = selfMatches && matchesStatus(a);
+      const visibleSubs = subs.filter((s) => matchesStatus(s) && (selfMatches ? !hidden.has(s.account) : visible(s)));
       if (!selfVisible && visibleSubs.length === 0) continue;
       matches += (selfVisible ? 1 : 0) + visibleSubs.length;
       nodes.push({ agent: a, subs: visibleSubs, subTotal: subs.length });
     }
-    if (filtering && nodes.length === 0) continue;
+    const registeredEmpty = room.registered && agents.length === 0 && filter?.sessions !== 'active' &&
+      normalizeSearch(query).split(/\s+/).every((term) => normalizeSearch(`${room.name} ${room.path}`).includes(term));
+    if (filtering && nodes.length === 0 && !registeredEmpty) continue;
 
     const present = [...new Set(agents.map((a) => a.account))].sort((x, y) => (accountOrder.get(x) ?? 99) - (accountOrder.get(y) ?? 99));
     groups.push({ room, accounts: present, nodes, agents, tasks: aggregateTasks(agents), matches });

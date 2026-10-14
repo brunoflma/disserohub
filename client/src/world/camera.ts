@@ -9,12 +9,16 @@ export interface Bounds {
   h: number;
 }
 
-/** Margens (px CSS) da visão geral: pílulas flutuantes acima das salas, meio-fio abaixo, laterais. */
-export const OVERVIEW_MARGIN = { top: 34, bottom: 10, side: 16 } as const;
+/** Margens (px CSS) da visão geral: placas acima das salas e uma folga mínima nas bordas. */
+export const OVERVIEW_MARGIN = { top: 24, bottom: 8, side: 10 } as const;
+
+/** Only the indoor footprint, with half a tile for wall edges. */
+export function interiorFrameBounds(building: Bounds): Bounds {
+  return { x: building.x - TILE / 2, y: building.y - TILE / 2, w: building.w + TILE, h: building.h + TILE };
+}
 
 /**
- * Enquadramento da visão geral: o prédio de 1,5 tile acima da parede norte (placas e itens altos)
- * até o meio-fio sul (cerca viva e calçada), dentro da área livre (fora dos painéis da UI).
+ * Enquadramento da visão geral: salas e áreas comuns, dentro da área livre (fora dos painéis da UI).
  * Retorna o zoom que cabe, o ponto do mundo a centralizar e quanto (px CSS) esse ponto fica abaixo
  * do centro da área livre (as margens de cima e de baixo são diferentes). Puro.
  */
@@ -25,7 +29,7 @@ export function overviewFrame(
   insets: { top: number; right: number; bottom: number; left: number },
 ): { zoom: number; cx: number; cy: number; dy: number } {
   const m = OVERVIEW_MARGIN;
-  const r = { x: building.x - TILE / 2, y: building.y - 1.5 * TILE, w: building.w + TILE, h: building.h + 3.5 * TILE };
+  const r = interiorFrameBounds(building);
   const freeW = Math.max(80, viewW - insets.left - insets.right - 2 * m.side);
   const freeH = Math.max(80, viewH - insets.top - insets.bottom - m.top - m.bottom);
   return { zoom: Math.min(freeW / r.w, freeH / r.h), cx: r.x + r.w / 2, cy: r.y + r.h / 2, dy: (m.top - m.bottom) / 2 };

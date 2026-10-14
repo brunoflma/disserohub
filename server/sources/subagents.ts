@@ -31,7 +31,7 @@ export const PENDING_TOOL_TIMEOUT_MS = 600_000;
 /** No boot, só entram subagentes escritos nos últimos 90 s. */
 export const BOOT_RECENT_MS = 90_000;
 
-const AGENT_FILE = /^agent-([\w-]+)\.jsonl$/;
+export const AGENT_FILE = /^agent-([\w-]+)\.jsonl$/;
 
 /** Pasta de dados da sessão (irmã do transcript <sessionId>.jsonl). */
 export function sessionDirOf(transcriptPath: string): string {

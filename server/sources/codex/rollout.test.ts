@@ -207,6 +207,41 @@ describe('rollout do Codex: legacy', () => {
   });
 });
 
+describe('rollout do Codex: perguntas', () => {
+  const question = { questions: [{ title: 'Pode manter o Chrome aberto?' }] };
+  const reply = '<send_user_message_question_reply>[{"questionItemId":"[\\"request_user_input_async\\",\\"ask\\",0]","answer":"Pronto"}]</send_user_message_question_reply>';
+
+  it('uma ferramenta MCP homônima não é interpretada como pergunta nativa do Codex', () => {
+    const { state, results } = feed([R.functionCall('other', 'request_user_input_async', question, 1, 'mcp__other')]);
+    expect(state.questions.waiting).toBe(false);
+    expect(results[0].signals).not.toContainEqual({ type: 'questions' });
+  });
+
+  it('reconhece chamada, confirmação, resposta do app e entrega duplicada sem criar outro prompt', () => {
+    const { state, results } = feed([R.meta(T), R.taskStarted('turn'), R.functionCall('ask', 'request_user_input_async', question), R.functionOutput('ask', '{"accepted":true}'), R.command(T, 'turn', 'other', 'npm test')]);
+    expect(state.questions.waiting).toBe(true);
+    expect(results[2].signals).toContainEqual({ type: 'questions' });
+    expect(results[2].activities[0].activity).toMatchObject({ kind: 'ask', questions: [{ question: 'Pode manter o Chrome aberto?' }] });
+    expect(parseRolloutLine(state, R.message('user', reply), ctx).signals).toContainEqual({ type: 'questions' });
+    const duplicate = parseRolloutLine(state, R.user(T, 'turn', 'reply', reply), ctx);
+    expect(duplicate.activities).toEqual([]);
+    expect(duplicate.signals).toEqual([]);
+    expect(state.questions.waiting).toBe(false);
+    expect(state.title).toBeUndefined();
+  });
+
+  it('legacy e leitura só de estado também acompanham pergunta bloqueante e seu resultado', () => {
+    const state = createCodexState();
+    const silent = { ...ctx, activities: false };
+    const ask = parseRolloutLine(state, R.functionCall('ask', 'request_user_input', { questions: [{ question: 'Continuar?' }] }, 1), silent);
+    expect(ask.activities).toEqual([]);
+    expect(state.questions.waiting).toBe(true);
+    const done = parseRolloutLine(state, R.functionOutput('ask', '{"answers":{}}', 2), silent);
+    expect(done.signals).toContainEqual({ type: 'questions' });
+    expect(state.questions.waiting).toBe(false);
+  });
+});
+
 describe('session_meta', () => {
   const meta = (source: unknown, extra: Record<string, unknown> = {}) =>
     parseSessionMeta({ id: T, session_id: T, cwd: '/p', source, history_mode: 'paginated', ...extra });

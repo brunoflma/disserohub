@@ -19,6 +19,7 @@ import type { AccountUsage, Activity, AgentStats, TaskItem, TaskStatus, UsageWin
 import { detectGitHubResult, githubCallOf } from '../github';
 import type { ParsedActivity } from '../transcript';
 import { tr } from '../../../shared/i18n';
+import { CodexQuestions, codexQuestionDescription } from './questions';
 
 type Rec = Record<string, unknown>;
 
@@ -314,6 +315,8 @@ export function planTasks(args: Rec): TaskItem[] | undefined {
  */
 export function describeCodexTool(rawName: string, input: Rec, namespace?: string): { desc: ActivityDescription; tool: string } {
   const name = namespace && /^mcp__/.test(namespace) ? `${namespace.replace(/_+$/, '')}__${rawName}` : rawName;
+  const question = codexQuestionDescription(name, input);
+  if (question) return { desc: question, tool: name };
   switch (name) {
     case 'Bash':
     case 'shell':
@@ -388,6 +391,7 @@ export interface CodexState {
   lastAt?: number;
   /** Chamadas de ferramenta ainda sem resultado (call_id → nome). */
   pending: Map<string, string>;
+  questions: CodexQuestions;
   /** Uso do plano mais recente (rate_limits) e o plano. */
   usage?: AccountUsage;
   planType?: string;
@@ -395,7 +399,7 @@ export interface CodexState {
 }
 
 export function createCodexState(meta?: RolloutMeta): CodexState {
-  const s: CodexState = { tasks: [], stats: { toolCalls: 0, tokensIn: 0, tokensOut: 0, subagents: 0 }, pending: new Map() };
+  const s: CodexState = { tasks: [], stats: { toolCalls: 0, tokensIn: 0, tokensOut: 0, subagents: 0 }, pending: new Map(), questions: new CodexQuestions() };
   if (meta) applyMeta(s, meta);
   return s;
 }
@@ -413,6 +417,7 @@ export type CodexSignal =
   | { type: 'turnEnd'; aborted: boolean }
   /** Algo concluiu dentro do turno (tira a espera por aprovação). */
   | { type: 'progress' }
+  | { type: 'questions' }
   | { type: 'usage'; usage: AccountUsage; plan?: string }
   | { type: 'github'; event: GitHubEvent; key: string }
   | { type: 'meta'; meta: RolloutMeta };
@@ -637,6 +642,7 @@ class RolloutLineParser {
   private endTurn(aborted: boolean): void {
     this.s.turnOpen = false;
     this.s.pending.clear();
+    this.s.questions.endTurn(this.at);
     this.out.signals.push({ type: 'turnEnd', aborted });
   }
 
@@ -674,6 +680,8 @@ class RolloutLineParser {
   }
 
   private prompt(raw: string, images: number, key?: string): void {
+    if (this.s.questions.reply(raw)) this.out.signals.push({ type: 'questions' });
+    if (raw.trimStart().startsWith('<send_user_message_question_reply>')) return;
     const text = promptText(raw) || (images ? tr('[imagem]') : '');
     if (!text) return;
     if (this.s.title === undefined) {
@@ -832,6 +840,7 @@ class RolloutLineParser {
   private responseItem(p: Rec): void {
     switch (p.type) {
       case 'message': {
+        if (p.role === 'user' && this.s.questions.reply(contentText(p.content).text)) this.out.signals.push({ type: 'questions' });
         // Só a resposta entregue no code mode (as outras mensagens são o contexto mandado ao modelo).
         const delivered = deliveredMessage(this.j);
         if (delivered) {
@@ -845,6 +854,8 @@ class RolloutLineParser {
         const callId = str(p.call_id) ?? str(p.id);
         const name = str(p.name) ?? 'ferramenta';
         const input = p.type === 'custom_tool_call' ? { input: p.input, command: p.input } : parseArguments(p.arguments);
+        const { desc, tool } = describeCodexTool(name, input, str(p.namespace));
+        if (this.s.questions.start(callId, tool, input, this.at, this.ctx.idPrefix)) this.out.signals.push({ type: 'questions' });
         if (callId) {
           this.s.pending.set(callId, name);
           if (this.s.pending.size > MAX_PENDING) this.s.pending.delete(this.s.pending.keys().next().value as string);
@@ -861,7 +872,6 @@ class RolloutLineParser {
           }
         }
         // Atividade em andamento: o item concluído (paginated) chega depois com o mesmo id e não duplica.
-        const { desc, tool } = describeCodexTool(name, input, str(p.namespace));
         this.push(desc, { key: callId, tool, callId });
         return;
       }
@@ -878,6 +888,7 @@ class RolloutLineParser {
       case 'function_call_output':
       case 'custom_tool_call_output': {
         const callId = str(p.call_id);
+        if (this.s.questions.complete(callId, p.output)) this.out.signals.push({ type: 'questions' });
         const name = callId ? this.s.pending.get(callId) : undefined;
         if (callId) this.s.pending.delete(callId);
         if (this.paginated()) return;

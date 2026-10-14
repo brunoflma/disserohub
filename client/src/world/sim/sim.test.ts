@@ -1,9 +1,11 @@
 // Integração da simulação sem DOM: snapshots -> personagens andando, sentando, apagando a luz e indo embora.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AppearanceParts } from '../../../../shared/appearance';
 import type { AgentInfo, OfficeSnapshot, RoomInfo, ShellJob } from '../../../../shared/types';
 import type { Appearance, ArtModule, RoomTheme } from '../../art/api';
 import { DEFAULT_WORLD_OPTIONS } from '../api';
+import { LOUNGE_ID, RECEPTION_ID } from '../layout/core';
+import * as behavior from './behavior';
 import type { Character } from './character';
 import { SHELL_DONE_TOOL, Sim } from './sim';
 
@@ -223,18 +225,23 @@ describe('simulação do escritório', () => {
     expect(sim.chars.has('ana:s1')).toBe(false);
   });
 
-  it('ocioso passeia e volta para a mesa', () => {
+  it('ocioso passeia, volta à poltrona e retoma a mesa com trabalho novo', () => {
     const sim = newSim();
     const clock = { now: T0 };
     sim.applySnapshot(snap([room('/a', 0)], [agent('ana', '/a', 'idle', { statusSince: T0 })]), clock.now);
     const ana = sim.chars.get('ana')!;
+    const resting = ana.atSpot;
+    expect(sim.spots.get(resting)?.kind).toBe('armchair');
+    expect(resting).not.toBe(ana.homeSpot);
     ana.nextOutingAt = 1;
     let left = false;
-    run(sim, clock, 60, () => {
-      if (ana.atSpot !== ana.homeSpot) left = true;
-      return left && ana.atSpot === ana.homeSpot;
+    run(sim, clock, 180, () => {
+      if (!ana.atSpot) left = true;
+      return left && !!ana.atSpot && !ana.step && !ana.queue.length;
     });
     expect(left).toBe(true);
+    expect(ana.atSpot).not.toBe(ana.homeSpot);
+    expect(sim.spots.get(ana.atSpot)?.kind).toBe('armchair');
     // volta ao trabalho imediatamente quando o status muda
     sim.applySnapshot(snap([room('/a', 0)], [agent('ana', '/a', 'working')], 2), clock.now);
     run(sim, clock, 60, () => !!ana.homeSpot && ana.atSpot === ana.homeSpot && !ana.step && !ana.queue.length);
@@ -242,12 +249,19 @@ describe('simulação do escritório', () => {
     expect(ana.pose).toBe('type');
   });
 
-  it('quem cochila na mesa (ocioso há muito tempo) acorda ao levantar: o "zzz" não vai junto', () => {
+  it('quem cochila na poltrona acorda ao levantar: o "zzz" não vai junto', () => {
     const sim = newSim();
     const clock = { now: T0 };
     sim.applySnapshot(snap([room('/a', 0)], [agent('ana', '/a', 'idle', { statusSince: T0 - 3_600_000 })]), clock.now);
     const ana = sim.chars.get('ana')!;
-    run(sim, clock, 60, () => ana.atSpot === ana.homeSpot && ana.icon === 'zzz');
+    // A recepção permanece acordada; o cochilo deste cenário acontece na Sala de Convivência.
+    const seat = sim.spots.findFree('armchair', { by: ana.id, filter: (s) => s.areaId === LOUNGE_ID })!;
+    expect(sim.spots.reserve(seat.id, ana.id)).toBe(true);
+    ana.tempSpots.push(seat.id);
+    ana.queue.push({ t: 'exit' }, { t: 'go', tx: seat.tx, ty: seat.ty }, { t: 'enter', spot: seat.id });
+    run(sim, clock, 60, () => ana.atSpot !== ana.homeSpot && ana.icon === 'zzz');
+    expect(sim.spots.get(ana.atSpot)?.kind).toBe('armchair');
+    expect(sim.spots.get(ana.atSpot)?.areaId).toBe(LOUNGE_ID);
     expect(ana.pose).toBe('sleep');
     expect(ana.icon).toBe('zzz');
     // Uma roda (ou qualquer plano) tira do lugar sem mudar o modo: segue "ocioso há muito tempo".
@@ -258,6 +272,81 @@ describe('simulação do escritório', () => {
     // A verificação de 1 em 1 s não devolve o "zzz" a quem está de pé.
     run(sim, clock, 1.5);
     expect(ana.icon).toBeNull();
+  });
+
+  it.each(['bathroom', 'reception', 'coffee', 'lounge'] as const)('ocioso visita %s depois de dez minutos e volta ao descanso', (activity) => {
+    const choice = vi.spyOn(behavior, 'pickIdleActivity').mockReturnValue(activity);
+    try {
+      const sim = newSim();
+      const clock = { now: T0 };
+      sim.applySnapshot(snap([room('/a', 0)], [agent('ana', '/a', 'idle', { statusSince: T0 - 11 * 60_000 })]), clock.now);
+      const ana = sim.chars.get('ana')!;
+      ana.nextOutingAt = 1;
+      let visited = false;
+      run(sim, clock, 180, () => {
+        const spot = sim.spots.get(ana.atSpot);
+        if (activity === 'bathroom') visited ||= ana.inside && ana.step?.t === 'stall';
+        else if (activity === 'coffee') visited ||= ana.pose === 'drink' && ana.held === 'coffee';
+        else visited ||= spot?.areaId === (activity === 'lounge' ? LOUNGE_ID : RECEPTION_ID) && ana.step?.t === 'act';
+        return visited && !ana.step && !ana.queue.length && ana.nextOutingAt > clock.now;
+      });
+      expect(visited).toBe(true);
+      expect(ana.atSpot).not.toBe(ana.homeSpot);
+      expect(sim.spots.get(ana.atSpot)?.kind).toBe('armchair');
+      expect(sim.spots.reservedBy(ana.id)).toHaveLength(2);
+      sim.applySnapshot(snap([room('/a', 0)], [agent('ana', '/a', 'waiting', { waitingFor: 'responder' })], 2), clock.now);
+      run(sim, clock, 90, () => ana.atSpot === ana.homeSpot && !ana.step && !ana.queue.length);
+      run(sim, clock, 0.1);
+      expect(ana.pose).toBe('raise_hand');
+      expect(sim.spots.reservedBy(ana.id)).toEqual([ana.homeSpot]);
+    } finally {
+      choice.mockRestore();
+    }
+  });
+
+  it('usa o sofá da recepção quando as poltronas estão ocupadas, permanece acordado e volta ao trabalho', () => {
+    const choice = vi.spyOn(behavior, 'pickIdleActivity').mockReturnValue('reception');
+    try {
+      const sim = newSim();
+      const clock = { now: T0 };
+      sim.applySnapshot(snap([room('/a', 0)], [agent('ana', '/a', 'working')]), clock.now);
+      const ana = sim.chars.get('ana')!;
+      for (const s of sim.spots.ofKind('armchair').filter((s) => s.areaId === RECEPTION_ID)) {
+        expect(sim.spots.reserve(s.id, 'visitor')).toBe(true);
+      }
+      sim.applySnapshot(snap([room('/a', 0)], [agent('ana', '/a', 'idle', { statusSince: T0 - 11 * 60_000 })], 2), clock.now);
+      run(sim, clock, 60, () => ana.atSpot !== ana.homeSpot && !ana.step && !ana.queue.length);
+      ana.nextOutingAt = 1;
+      let sofa: string | undefined;
+      run(sim, clock, 90, () => {
+        const s = sim.spots.get(ana.atSpot);
+        if (s?.areaId === RECEPTION_ID) {
+          expect(ana.pose).not.toBe('sleep');
+          if (s.kind === 'sofa' && ana.pose === 'read') sofa = s.id;
+        }
+        return !!sofa;
+      });
+      expect(sofa).toBeDefined();
+      sim.applySnapshot(snap([room('/a', 0)], [agent('ana', '/a', 'working')], 3), clock.now);
+      run(sim, clock, 60, () => ana.atSpot === ana.homeSpot && !ana.step && !ana.queue.length);
+      run(sim, clock, .1);
+      expect(ana.pose).toBe('type');
+      expect(sim.spots.ownerOf(sofa!)).toBeUndefined();
+    } finally {
+      choice.mockRestore();
+    }
+  });
+
+  it('aba oculta mantém o ocioso na poltrona, sem levá-lo de volta ao computador', () => {
+    const sim = newSim();
+    const clock = { now: T0 };
+    sim.applySnapshot(snap([room('/a', 0)], [agent('ana', '/a', 'idle')]), clock.now);
+    clock.now += 90_000;
+    sim.fastForward(clock.now);
+    const ana = sim.chars.get('ana')!;
+    expect(sim.spots.get(ana.atSpot)?.kind).toBe('armchair');
+    expect(ana.atSpot).not.toBe(ana.homeSpot);
+    expect(sim.spots.ownerOf(ana.atSpot!)).toBe(ana.id);
   });
 
   it('avanço rápido (aba oculta) teletransporta para os destinos', () => {
@@ -290,24 +379,28 @@ describe('simulação do escritório', () => {
     expect(['building', 'ready']).toContain(a!.phase);
   });
 
-  it('carga inicial: ninguém começa parado em banco de corredor/banheiro e nenhuma sala fica vazia', () => {
+  it('carga inicial: ociosos descansam em assentos distintos, preservando mesas para a retomada', () => {
     for (const since of [T0, T0 - 5 * 60_000]) {
       const sim = newSim();
       const clock = { now: T0 };
       const agents: AgentInfo[] = [];
       for (let i = 0; i < 12; i++) agents.push(agent(`ocioso-${String.fromCharCode(97 + i)}${'x'.repeat(i)}`, i % 2 ? '/b' : '/a', 'idle', { statusSince: since }));
       sim.applySnapshot(snap([room('/a', 0), room('/b', 1)], agents), clock.now);
+      const seats = new Set<string>();
       for (const ch of sim.chars.values()) {
         const at = ch.atSpot ? sim.spots.get(ch.atSpot) : undefined;
         expect(at, `${ch.id} sem lugar`).toBeDefined();
-        expect(at!.kind).not.toBe('bench');
-        // quem acabou de ficar ocioso começa na própria mesa
-        if (since === T0) expect(ch.atSpot).toBe(ch.homeSpot);
+        expect(['armchair', 'sofa', 'beanbag', 'nook', 'cafe_seat', 'bench']).toContain(at!.kind);
+        if (at!.kind === 'bench') expect(at!.areaId).toBe(RECEPTION_ID);
+        expect(seats.has(at!.id)).toBe(false);
+        seats.add(at!.id);
+        expect(sim.spots.ownerOf(at!.id)).toBe(ch.id);
+        if (ch.homeSpot) expect(sim.spots.ownerOf(ch.homeSpot)).toBe(ch.id);
       }
-      for (const id of ['/a', '/b']) expect([...sim.chars.values()].some((c) => c.roomId === id && c.atSpot === c.homeSpot)).toBe(true);
       // e ninguém sai passear nos primeiros segundos
+      const initial = [...sim.chars.values()].map((ch) => ch.atSpot);
       run(sim, clock, 3);
-      if (since === T0) for (const ch of sim.chars.values()) expect(ch.atSpot, ch.id).toBe(ch.homeSpot);
+      expect([...sim.chars.values()].map((ch) => ch.atSpot)).toEqual(initial);
     }
   });
 
@@ -664,13 +757,10 @@ describe('espera de shell', () => {
     expect(ana.atSpot === ana.homeSpot).toBe(false);
     sim.applySnapshot(snap(rooms, [agent('ana', '/a', 'shell', { shells: [shell(1000)] })], 2), clock.now);
     expect(ana.mode).toBe('shell');
-    let ran = false;
     run(sim, clock, 60, () => {
-      if (ana.pose === 'run') ran = true;
       return ana.atSpot === ana.homeSpot && !ana.step && !ana.queue.length;
     });
     expect(ana.atSpot).toBe(ana.homeSpot);
-    expect(ran).toBe(false);
     run(sim, clock, 0.1);
     expect(ana.pose).toBe('wait');
   });

@@ -17,19 +17,24 @@ export interface WorldOptions {
   dayNight: boolean;
   /** (Opcional, aditivo) Ciclo dia/noite: automático, sempre dia ou sempre noite. Vale sobre `dayNight`. */
   daylight?: DaylightMode;
-  /** Tema visual: automático (segue o calendário; ver seasonalThemeFor), nenhum, Natal ou Halloween. */
+  /** Tema visual: jurídico (sem decoração sazonal), automático, nenhum, Natal ou Halloween. */
   theme?: OfficeTheme;
+  /** Reduce canvas rendering to 30 frames/s without changing agent data. */
+  economy?: boolean;
+  /** Legal-office reading and discussions, independently of seasonal decoration. */
+  legalOffice?: boolean;
 }
 
 /** Tema que o renderer desenha: o escritório original ('none') ou um dos sazonais. */
 export type SeasonalTheme = 'none' | 'christmas' | 'halloween';
-export type OfficeTheme = 'auto' | SeasonalTheme;
+export type OfficeTheme = 'auto' | 'legal' | SeasonalTheme;
 
 /**
  * Tema desenhado numa data (hora local). No automático: Halloween de 1º a 31 de outubro, Natal de 1º de novembro a
  * 26 de dezembro e, no resto do ano, o escritório original.
  */
 export function seasonalThemeFor(theme: OfficeTheme | undefined, date: Date): SeasonalTheme {
+  if (theme === 'legal') return 'none';
   if (theme && theme !== 'auto') return theme;
   const month = date.getMonth();
   if (month === 9) return 'halloween';
@@ -65,6 +70,9 @@ export interface WorldApi {
   focusRoom(id: string): void;
   /** Enquadra o prédio inteiro. */
   overview(): void;
+  offices?(): void;
+  restoreCamera?(state: CameraView): void;
+  onCameraChange?(cb: (state: CameraView) => void): () => void;
   zoomBy(factor: number): void;
   getOptions(): WorldOptions;
   setOptions(o: Partial<WorldOptions>): void;
@@ -94,6 +102,16 @@ export interface WorldApi {
   /** (Opcional, aditivo) Sons do ambiente: teclado de quem trabalha à vista, elevador, rodas. */
   onSound?(cb: (cue: SoundCue) => void): () => void;
   destroy(): void;
+}
+
+export interface CameraView {
+  x: number;
+  y: number;
+  zoom: number;
+  cols: number;
+  width: number;
+  height: number;
+  mode: 'overview' | 'offices' | 'manual';
 }
 
 /** Relógios do timelapse (ver world/playback.ts). */

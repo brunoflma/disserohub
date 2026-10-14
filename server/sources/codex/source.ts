@@ -17,6 +17,8 @@
 // - versão sem `thread-writer-locks/` (ou Docker sem a pasta montada): rollout modificado nos últimos 30 min;
 // - um evento de hook segura o agente presente por HOOK_PRESENCE_MS mesmo sem lock visível; SessionEnd fecha (se o
 //   lock também sumiu, ou depois de SESSION_END_GRACE_MS).
+// O Office separa essa conexão da presença visual: principais ociosos há 15 min ficam fora do cenário e da lista,
+// continuam sendo observados e reaparecem com trabalho novo; carregar a conversa não renova esse prazo.
 // Subagentes (spawn_agent) são threads próprios, com lock e rollout: o session_meta aponta o pai. Entram como
 // subagentes do pai enquanto trabalham e entregam ao concluir o turno (ou ao sumir); threads internos (guardian,
 // revisão, compactação, memória) ficam de fora.
@@ -142,6 +144,8 @@ interface ThreadTracker {
   /** Quando o status foi decidido (linha do rollout ou evento de hook): informação mais velha não o muda. */
   statusAt: number;
   waitingFor?: string;
+  /** Aprovação por hook, separada das perguntas assíncronas. */
+  approvalWaiting?: boolean;
   lastHookAt?: number;
   /** mtime do rollout na última leitura. */
   lastWriteAt?: number;
@@ -452,6 +456,7 @@ export class CodexSource implements AgentSource, CodexLive {
         role: MAIN_ROLE,
         startedAt: t.meta?.startedAt ?? t.state.firstAt ?? now,
         status: t.status,
+        statusSince: t.status === 'idle' ? (t.statusAt || undefined) : undefined,
         waitingFor: t.waitingFor,
       });
       t.inOffice = office.has(t.key);
@@ -476,6 +481,7 @@ export class CodexSource implements AgentSource, CodexLive {
       // addSub começa em 'working': um pedido de aprovação visto antes de ele entrar vale já.
       if (t.status === 'waiting') office.setStatus(t.key, 'waiting', t.waitingFor);
     }
+    office.setPendingQuestions(t.key, t.state.questions.activities());
     this.flushBacklog(t);
     this.applySummary(t);
   }
@@ -495,6 +501,7 @@ export class CodexSource implements AgentSource, CodexLive {
   private statusToOffice(t: ThreadTracker): void {
     if (!t.inOffice) return;
     const office = this.opts.office;
+    office.setPendingQuestions(t.key, t.state.questions.activities());
     if (t.kind === 'main') {
       office.setStatus(t.key, t.status, t.waitingFor);
       return;
@@ -525,7 +532,7 @@ export class CodexSource implements AgentSource, CodexLive {
         return;
       }
       if (!path && !t.tail && t.acc.index.isCompressedOnly(t.threadId)) {
-        log.warnOnce('codex-zst', tr('Codex: há conversas compactadas (.jsonl.zst) que o Habblaud ainda não lê; elas ficam sem detalhes.'));
+        log.warnOnce('codex-zst', tr('Codex: há conversas compactadas (.jsonl.zst) que o Dissero ainda não lê; elas ficam sem detalhes.'));
       }
     }
     if (!t.tail) return;
@@ -607,13 +614,24 @@ export class CodexSource implements AgentSource, CodexLive {
     const s = t.state;
     const at = s.lastAt ?? 0;
     if (at < t.statusAt) return;
+    t.status = this.executionStatus(t);
+    t.statusAt = at;
+    delete t.waitingFor;
+    if (s.questions.waiting) {
+      t.status = 'waiting';
+      t.waitingFor = 'responder uma pergunta no Codex';
+    }
+  }
+
+  /** Estado de execução sem a sobreposição de pergunta/aprovação, incluindo turnos que ficaram parados. */
+  private executionStatus(t: ThreadTracker): AgentStatus {
+    const s = t.state;
+    const at = s.lastAt ?? 0;
     let status: AgentStatus;
     if (s.turnOpen !== undefined) status = s.turnOpen ? 'working' : 'idle';
     else status = s.lastAt !== undefined && this.now() - s.lastAt < LEGACY_WORKING_MS ? 'working' : 'idle';
     if (status === 'working' && this.now() - Math.max(t.lastWriteAt ?? 0, at) > WORKING_QUIET_MS) status = 'idle';
-    t.status = status;
-    t.statusAt = at;
-    delete t.waitingFor;
+    return status;
   }
 
   /** Aplica um resultado de linha: ao vivo vai direto ao escritório; na carga inicial, fica no backlog. */
@@ -627,13 +645,19 @@ export class CodexSource implements AgentSource, CodexLive {
           this.pushUsage(t.acc, sig.usage, sig.plan);
           break;
         case 'turnStart':
+          if (r.at >= t.statusAt) delete t.approvalWaiting;
           this.decide(t, 'working', r.at, undefined, live);
           break;
         case 'turnEnd':
+          if (r.at >= t.statusAt) delete t.approvalWaiting;
           this.decide(t, 'idle', r.at, undefined, live);
           break;
         case 'progress':
+          if (r.at >= t.statusAt) delete t.approvalWaiting;
           if (t.status === 'waiting') this.decide(t, 'working', r.at, undefined, live);
+          break;
+        case 'questions':
+          this.decide(t, t.state.turnOpen === false ? 'idle' : 'working', r.at, undefined, live);
           break;
         default:
           break;
@@ -670,6 +694,13 @@ export class CodexSource implements AgentSource, CodexLive {
    */
   private decide(t: ThreadTracker, status: AgentStatus, at: number, waitingFor: string | undefined, live: boolean): void {
     if (at < t.statusAt) return;
+    if (t.state.questions.waiting) {
+      status = 'waiting';
+      waitingFor = 'responder uma pergunta no Codex';
+    } else if (t.approvalWaiting) {
+      status = 'waiting';
+      waitingFor = 'aprovar um comando';
+    }
     t.statusAt = at;
     t.status = status;
     if (waitingFor) t.waitingFor = waitingFor;
@@ -711,6 +742,7 @@ export class CodexSource implements AgentSource, CodexLive {
         state.model ??= prefix.state.model;
         if (!state.tasks.length && prefix.state.tasks.length) state.tasks = prefix.state.tasks;
         if (prefix.state.firstAt !== undefined && (state.firstAt === undefined || prefix.state.firstAt < state.firstAt)) state.firstAt = prefix.state.firstAt;
+        if (state.questions.merge(prefix.state.questions)) this.decide(t, this.executionStatus(t), Math.max(t.statusAt, state.lastAt ?? 0), undefined, true);
         this.applySummary(t);
         if (t.inOffice) this.opts.office.mergeHistory(t.key, prefix.activities);
       })
@@ -834,33 +866,60 @@ export class CodexSource implements AgentSource, CodexLive {
     switch (event) {
       case 'SubagentStart':
         t.hookSpawned = true;
+        t.state.turnOpen = true;
+        delete t.approvalWaiting;
         this.decide(t, 'working', now, undefined, true);
         break;
       case 'SubagentStop':
+        delete t.approvalWaiting;
+        t.state.turnOpen = false;
+        t.state.questions.endTurn(now);
         this.decide(t, 'idle', now, undefined, true);
         break;
-      case 'UserPromptSubmit':
       case 'PostToolUse':
+        t.state.questions.complete(str(input.tool_use_id), input.tool_response);
+        delete t.approvalWaiting;
+        // Uma conclusão atrasada não inicia outro turno do subagente que já saiu.
+        this.decide(t, t.subDone && !t.state.turnOpen ? 'idle' : 'working', now, undefined, true);
+        break;
+      case 'UserPromptSubmit': {
+        const prompt = str(input.prompt) ?? '';
+        t.state.questions.reply(prompt);
+        if (!prompt.trimStart().startsWith('<send_user_message_question_reply>')) {
+          t.state.turnOpen = true;
+          delete t.approvalWaiting;
+        }
+        this.decide(t, t.state.turnOpen === false ? 'idle' : 'working', now, undefined, true);
+        break;
+      }
       case 'PreCompact':
       case 'PostCompact':
-        this.decide(t, 'working', now, undefined, true);
+        delete t.approvalWaiting;
+        this.decide(t, t.subDone && !t.state.turnOpen ? 'idle' : 'working', now, undefined, true);
         break;
       case 'PreToolUse': {
+        t.state.turnOpen = true;
+        delete t.approvalWaiting;
         this.decide(t, 'working', now, undefined, true);
         if (t !== rootT) this.reconcile(t, now, 'hook');
         const toolName = str(input.tool_name) ?? 'ferramenta';
         const toolInput = rec(input.tool_input) ?? {};
         const { desc, tool } = describeCodexTool(toolName, toolInput);
         const id = str(input.tool_use_id);
+        if (t.state.questions.start(id, toolName, toolInput, now, t.key)) this.decide(t, 'waiting', now, undefined, true);
         const act: Activity = { id: `${t.key}#${id ?? `hook${now.toString(36)}`}`, at: now, ...desc, tool };
         if (t.inOffice) office.addActivity(t.key, act, true);
         break;
       }
       case 'PermissionRequest':
+        t.approvalWaiting = true;
         this.decide(t, 'waiting', now, tr('aprovar um comando'), true);
         break;
       case 'Stop':
       case 'Interrupt':
+        delete t.approvalWaiting;
+        t.state.turnOpen = false;
+        t.state.questions.endTurn(now);
         this.decide(t, 'idle', now, undefined, true);
         break;
       default:

@@ -1,37 +1,40 @@
-// Peças visuais reutilizadas pelos painéis: chip de conta (e o selo "Codex"), ponto de status, selo de papel, barra
+// Peças visuais reutilizadas pelos painéis: chip de conta (e o selo "ChatGPT"), ponto de status, selo de papel, barra
 // de progresso.
 import type { AccountInfo, Activity, AgentInfo, AgentStatus, Provider } from '../../../shared/types';
+import { PROVIDER_LOGO } from '../brand';
 import { h, setAttr, setHidden, setStyleVar, setText, setTitle, setVariant } from './dom';
-import { WORDMARK } from './icons';
+import { PRODUCT_NAME } from '../../../shared/branding';
 import { shellDoneKind, shellLine, shellStage, statusLabel, type ShellWait } from './model';
-import { accountChipLabel, accountProvider, fallbackShort, showsProviderTag } from './provider';
+import { accountChipLabel, accountProvider, showsProviderTag } from './provider';
 import { tr } from '../../../shared/i18n';
+import { activityDisplayText } from './feed-policy';
 
 /**
- * Chip quadrado com a letra curta da conta ("C", "D") na cor da conta. Conta do Codex: o chip fica vazado (fundo
- * escuro, borda e letra na cor da conta, cantos em degrau): `data-provider="codex"`.
+ * Chip com o mascote do Claude Code ou a marca do ChatGPT/Codex; a borda identifica a conta.
  */
 export function createAccountChip(size: 'sm' | 'md' | 'lg' = 'sm'): HTMLElement {
-  return h('span', { class: `ui-acc-chip ui-acc-chip--${size}` });
+  return h('span', { class: `ui-acc-chip ui-acc-chip--${size}`, role: 'img' }, h('img', { class: 'ui-provider-logo', attrs: { alt: '', 'aria-hidden': 'true', draggable: 'false' } }));
 }
 
 /** `provider` = dica para quando a conta não está no snapshot (ex.: a sessão do histórico diz de que ferramenta é). */
-export function updateAccountChip(chip: HTMLElement, account: AccountInfo | undefined, fallbackId = '', provider?: Provider): void {
+export function updateAccountChip(chip: HTMLElement, account: (Pick<AccountInfo, 'id' | 'short' | 'name' | 'color'> & Partial<AccountInfo>) | undefined, fallbackId = '', provider?: Provider): void {
   const p = accountProvider(account, fallbackId, provider);
-  setText(chip, account?.short ?? fallbackShort(fallbackId, p));
+  const logo = chip.firstElementChild as HTMLImageElement;
+  const src = PROVIDER_LOGO[p];
+  if (logo.getAttribute('src') !== src) logo.setAttribute('src', src);
   setStyleVar(chip, '--acc', account?.color ?? '#8b98b3');
-  setAttr(chip, 'data-provider', p === 'codex' ? 'codex' : null);
+  setAttr(chip, 'data-provider', p);
   const label = accountChipLabel(account, fallbackId, p);
   setTitle(chip, label);
   setAttr(chip, 'aria-label', label);
 }
 
-/** Selo de texto "Codex" ao lado do nome da conta (onde há espaço: gaveta, terminal, cartão de uso, dica). */
+/** Selo de texto "ChatGPT" ao lado do nome da conta (onde há espaço: gaveta, terminal, cartão de uso, dica). */
 export function createProviderTag(extra = ''): HTMLElement {
-  return h('span', { class: `ui-prov${extra ? ` ${extra}` : ''}`, text: 'Codex', hidden: true, title: tr('Agente do Codex (OpenAI)') });
+  return h('span', { class: `ui-prov${extra ? ` ${extra}` : ''}`, text: 'ChatGPT', hidden: true, title: tr('Agente do ChatGPT/Codex (OpenAI)') });
 }
 
-/** Mostra o selo só para o Codex (e não repete quando o nome da conta já diz "Codex"). */
+/** Mostra o selo só para a conta do Codex, sem repetir a marca presente no nome. */
 export function updateProviderTag(tag: HTMLElement, provider: Provider, accountName = ''): void {
   setHidden(tag, !showsProviderTag(provider, accountName));
 }
@@ -97,7 +100,7 @@ function activityParts(el: HTMLElement): [HTMLElement, HTMLElement, HTMLElement,
 export function updateActivityLine(el: HTMLElement, activity: Activity | undefined, fallback = tr('Sem atividade ainda')): void {
   const [icon, text, time, count] = activityParts(el);
   setText(icon, activity?.icon ?? '·');
-  setText(text, activity?.text ?? fallback);
+  setText(text, activity ? activityDisplayText(activity) : fallback);
   setHidden(time, true);
   setHidden(count, true);
   el.classList.remove('is-shell');
@@ -129,10 +132,7 @@ export function updateShellActivityLine(el: HTMLElement, wait: ShellWait, now: n
   );
 }
 
-/** Nome do produto como logotipo em pixels (o texto fica para leitores de tela). */
+/** A readable wordmark beside the official open-D symbol. */
 export function wordmark(cls = 'ui-brand__name'): HTMLElement {
-  const el = h('span', { class: cls });
-  el.innerHTML = WORDMARK;
-  el.append(h('span', { class: 'ui-sr', text: 'Habblaud' }));
-  return el;
+  return h('span', { class: `${cls} ui-dissero-wordmark`, text: PRODUCT_NAME });
 }

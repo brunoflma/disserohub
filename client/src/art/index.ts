@@ -1,4 +1,4 @@
-// Módulo de arte (pixel art procedural) do Habblaud — implementação do contrato ArtModule (./api.ts).
+// Módulo de arte (pixel art procedural) do Dissero — implementação do contrato ArtModule (./api.ts).
 //
 // Tudo é desenhado em código: a geração acontece em PixelBuf (puro, testável em Node) e só no fim
 // vira canvas, uma única vez por combinação de parâmetros (cache). As funções draw* chamadas a cada
@@ -21,6 +21,7 @@ import {
   type WallStyle,
 } from './api';
 import { appearanceFromSeed as appearanceFromSeedPure, appearanceKey } from './character/appearance';
+import { legalAppearance } from '../local/legal-appearance';
 import { CHAR_H, CHAR_W, POSE_DURATION, POSE_FRAMES, isSeated, renderCharacter } from './character/render';
 import { shade } from './core/color';
 import { PixelBuf } from './core/pixbuf';
@@ -89,7 +90,7 @@ function keyOf(a: Appearance): string {
 // ------------------------------------------------------------------ personagens
 
 export function appearanceFromSeed(seed: number, opts: { look?: 'f' | 'm'; sub?: boolean; parts?: AppearanceParts } = {}): Appearance {
-  return appearanceFromSeedPure(seed, opts);
+  return legalAppearance(appearanceFromSeedPure(seed, opts), seed, opts.parts);
 }
 
 export function poseFrameCount(pose: Pose): number {
@@ -112,7 +113,7 @@ export function avatarCanvas(seed: number, opts: { look?: 'f' | 'm'; sub?: boole
   const scale = Math.max(1, Math.round(opts.scale ?? 3));
   const key = `${seed}|${opts.look ?? '-'}|${opts.sub ? 1 : 0}|${scale}|${partsKey(opts.parts)}`;
   return avatarCache.get(key, () => {
-    const s = renderCharacter({ appearance: appearanceFromSeedPure(seed, opts), dir: 'down', pose: 'stand', frame: 0 });
+    const s = renderCharacter({ appearance: appearanceFromSeed(seed, opts), dir: 'down', pose: 'stand', frame: 0 });
     // Busto: cabeça + ombros (20x20 a partir do topo do cabelo).
     const crop = s.buf.crop(2, 2, CHAR_W - 4, 20);
     const out = new PixelBuf(crop.w * scale, crop.h * scale);

@@ -4,7 +4,7 @@
 // Descoberta: HABBLAUD_CODEX_DIRS (lista separada por vírgula) substitui tudo; senão CODEX_HOME e `$HOME/.codex*`
 // que tenham cara de pasta do Codex (isCodexHome). Letra da conta: o alias de shell `alias x='CODEX_HOME=... codex'`
 // (sem CODEX_HOME = a pasta padrão); sem alias, uma letra derivada que não colide com as do Claude Code. Cor: da
-// paleta das contas, sem repetir as do Claude Code. Nome: "Codex" (ou "Codex X" com mais de uma conta). O plano
+// paleta das contas, sem repetir as do Claude Code. Nome: "ChatGPT" (ou "ChatGPT X" com mais de uma conta). O plano
 // vem depois, dos arquivos de sessão (rate_limits.plan_type).
 //
 // Privacidade: NUNCA lê `auth.json` nem `config.toml` (só confere se existem, em isCodexHome); dos arquivos de shell,
@@ -136,7 +136,7 @@ export function detectCodexAccounts(dirs: string[], opts: CodexDetectOptions = {
       provider: 'codex',
       configDir: str(p.ov?.configDir) ?? p.dir,
       short,
-      name: str(p.ov?.name) ?? (dirs.length > 1 ? `Codex ${short}` : 'Codex'),
+      name: str(p.ov?.name) ?? (dirs.length > 1 ? `ChatGPT ${short}` : 'ChatGPT'),
       color,
     };
     const plan = str(p.ov?.plan);

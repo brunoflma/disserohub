@@ -1,10 +1,9 @@
-// Ajuda ("?"): legenda de status e ícones, controles, o que o escritório mostra, contas e uso, e o Codex.
+// Ajuda ("?"): legenda de status e ícones, controles, o que o escritório mostra, contas e uso, Claude e ChatGPT.
 import type { AgentStatus } from '../../../shared/types';
 import type { HelpSection } from './context';
 import { h, iconButton, prefersReducedMotion } from './dom';
 import { ICONS } from './icons';
-import { SHELL_STAGES, STATUS_LABEL } from './model';
-import { CODEX_LIVE_HINT } from './provider';
+import { STATUS_LABEL } from './model';
 import { createUsageSetup, richText } from './usage';
 import { createAccountChip, updateAccountChip } from './widgets';
 import { tr } from '../../../shared/i18n';
@@ -12,10 +11,10 @@ import { tr } from '../../../shared/i18n';
 const STATUS_HELP: [AgentStatus, string][] = [
   ['working', tr('Na mesa, digitando: está processando um pedido.')],
   ['waiting', tr('Mão levantada: espera uma resposta sua no terminal (permissão, pergunta ou escolha).')],
-  ['shell', tr('Ampulheta sobre a cabeça: terminou o turno e fica na mesa esperando um shell terminar.')],
-  ['idle', tr('Terminou o turno e circula pelo escritório até a próxima instrução.')],
-  ['done', tr('Subagente que concluiu: entrega o resultado e vai embora.')],
-  ['offline', tr('A sessão foi fechada: o personagem vai até o elevador e sai.')],
+  ['shell', tr('O turno terminou e há um comando do terminal em execução. O agente permanece na mesa lendo documentos enquanto espera o resultado.')],
+  ['idle', tr('Não há tarefa imediata; o agente pode circular pelas áreas comuns até receber uma nova instrução.')],
+  ['done', tr('Subagente concluído: entrega o resultado e deixa o escritório.')],
+  ['offline', tr('A sessão foi encerrada e o personagem deixa o escritório.')],
 ];
 
 const ICON_HELP: [string, string][] = [
@@ -26,58 +25,58 @@ const ICON_HELP: [string, string][] = [
   ['✏️', tr('Editando')],
   ['📝', tr('Escrevendo arquivo')],
   ['💻', tr('Comando no terminal')],
-  ['⏳', tr('Esperando um shell')],
+  ['⏳', tr('Esperando o comando terminar')],
   ['🧪', tr('Rodando testes')],
   ['🌐', tr('Pesquisando na web')],
   ['🗒️', tr('Organizando tarefas')],
   ['👥', tr('Chamando subagentes')],
   ['✋', tr('Precisa de você')],
   ['✅', tr('Concluiu')],
-  ['❌', tr('Shell falhou')],
-  ['🛑', tr('Shell interrompido')],
+  ['❌', tr('Comando falhou')],
+  ['🛑', tr('Comando interrompido')],
   ['⚠️', tr('Algo deu errado')],
 ];
 
-/** Rodas da vida social (quem está à toa se junta com os colegas). */
+/** Áreas comuns e interações da apresentação do escritório jurídico. */
 const SOCIAL_HELP: [string, string][] = [
-  ['📺', tr('TV no lounge: futebol (comemoram o gol junto com a tela), novela ou desenho, com pipoca.')],
-  ['🎮', tr('Videogame no sofá (melhor de 3) ou duelo nos fliperamas, com torcida.')],
-  ['🏓', tr('Pingue-pongue até 5 pontos, com placar e torcida atrás da mesa.')],
-  ['☕', tr('Papo na copa: pegam café e sentam para fofocar, contar piada e falar de trabalho.')],
-  ['✊', tr('Jokenpô valendo moedinhas: jo-ken-pô, revelação, quem ganha leva o 🪙 (e quem perde pede revanche).')],
-  ['💄', tr('Espelho do banheiro: se arrumam (batom, pente) e aparecem refletidos no vidro.')],
-  ['🪙', tr('Carteira: entram com 🪙100 (subagentes 🪙30), ganham 🪙10 por tarefa concluída, 🪙5 por pedido atendido e 🪙15 por entrega de subagente.')],
+  ['📚', tr('Sala de Convivência: um agente pode fazer uma leitura individual; de 2 a 4 agentes podem debater uma tese e organizar os argumentos.')],
+  ['☕', tr('Copa: uma mesa com seis lugares para uma pausa curta e conversa entre agentes disponíveis.')],
+  ['🛎️', tr('Recepção: dois lugares de espera agrupados, usados para aguardar ou fazer uma leitura breve.')],
+  ['🚻', tr('Banheiro: uma passagem breve, sem assento de descanso.')],
+  ['↩️', tr('Quando recebe uma nova instrução, o agente deixa a área comum e retorna ao trabalho.')],
 ];
 
-/** Eventos do GitHub vistos ao vivo nas sessões (gh, git push, MCP do GitHub). */
+/** Eventos de integração que podem ser apresentados no feed. */
 const GITHUB_HELP: [string, string][] = [
-  ['🎉', tr('Festa: PR aberto ou mergeado, release publicada (ou CI verde depois de um alarme). Confete cai na sala, todos comemoram e uma faixa diz o motivo (~12 s).')],
-  ['🚨', tr('Alarme: o CI ficou vermelho. Giroflex nos cantos da sala, chão avermelhado e um balão “!” sobre quem viu a falha, até um CI verde na sala (ou 10 min).')],
-  ['🚀', tr('Push: só o aviso e o feed, sem mexer na sala.')],
+  ['📌', tr('Pull requests, releases e verificações de CI podem aparecer no feed quando a integração os fornece.')],
+  ['⚠️', tr('Falhas de verificação ficam destacadas como aviso; a correção continua no serviço de origem.')],
+  ['↗️', tr('Pushes e outros eventos podem aparecer apenas como informação no feed.')],
 ];
 
-/** O Codex no escritório: o que muda em relação ao Claude Code (trechos `assim` viram código). */
+/** O provedor ChatGPT no escritório e os dados que a sessão pode fornecer. */
 const CODEX_HELP: string[] = [
-  tr('Cada projeto aberto no Codex (no terminal ou no app) vira uma sala: a mesma do Claude Code naquela pasta, e os dois dividem a sala.'),
-  tr('Os agentes do Codex têm o chip da conta vazado (só a borda na cor da conta) e o selo CODEX na etiqueta e nos detalhes.'),
-  tr('{0} Sem os hooks, o escritório lê os arquivos de sessão do Codex: cada passo aparece quando termina.', [CODEX_LIVE_HINT]),
-  tr('Aprovar pelo escritório: no Codex, a aprovação só aparece no terminal depois que você responder aqui ou o prazo acabar (alguns segundos). Não há “não perguntar de novo” nem “interromper”, e recusar pede um motivo.'),
-  tr('Mensagens: entram na fila da sessão e viram o próximo prompt quando o Codex terminar o que está fazendo (até ~10 s). Com o Habblaud no Docker, deixe `npm run codex:bridge` rodando; no modo Node funciona sozinho.'),
-  tr('Perguntas do Codex são respondidas no próprio Codex.'),
-  tr('Uso: vem dos arquivos de sessão do Codex, sem instalar nada, e só se renova enquanto alguma sessão roda (por isso o cartão mostra a idade, ex.: “há 12 min”). “sem cota” quer dizer sem cota nem créditos para usar agora.'),
-  tr('Meu dia: o Codex conta tokens, mas não grava custo.'),
+  tr('As sessões do ChatGPT podem compartilhar a sala do projeto com sessões do Claude Code. O provedor é identificado pelo logotipo correspondente.'),
+  tr('O feed, os detalhes e o terminal mostram somente as informações que a sessão local disponibiliza.'),
+  tr('Terminal, pedidos de permissão, perguntas e envio de mensagens aparecem apenas quando a sessão oferece esses controles; a própria interface indica quando estão disponíveis.'),
+  tr('O uso mostra a última leitura fornecida pela sessão. A idade da leitura aparece no cartão, e a ausência de números não significa necessariamente uso zero.'),
+  tr('Referências técnicas ao Codex podem aparecer no projeto; na interface, o provedor é apresentado como ChatGPT.'),
 ];
 
-/** O fim da espera (o servidor marca com uma atividade ✅ ou ❌). */
+/** Resultado de um comando que estava em execução. */
 const SHELL_END_HELP: [string, string][] = [
-  ['🎉', tr('Terminou bem: levanta, comemora com confete e uma estrela.')],
-  ['🌧️', tr('Falhou ou foi interrompido: nuvenzinha de chuva sobre a cabeça e ombros caídos.')],
+  ['✅', tr('Concluído: o resultado do comando foi recebido e a sessão pode continuar.')],
+  ['⚠️', tr('Falhou ou foi interrompido: o estado fica registrado no feed e nos detalhes.')],
+];
+
+const SHELL_WAIT_HELP: [string, string][] = [
+  ['📄', tr('O agente permanece na mesa lendo documentos enquanto o comando do terminal termina.')],
+  ['⏱️', tr('O comando esperado e o tempo de espera aparecem no estado e nos detalhes.')],
 ];
 
 const INTRO =
-  tr('Cada projeto aberto no Claude Code ou no Codex vira uma sala (os dois no mesmo projeto dividem a sala), e cada sessão aberta é um personagem com nome próprio. ') +
-  tr('Subagentes chegam como colegas novos, trabalham na mesma sala e vão embora quando terminam. ') +
-  tr('Quando a última sessão de uma sala é fechada, quem sai apaga a luz e a sala é desmontada.');
+  tr('Cada projeto com sessões de agentes acompanhadas pelo Dissero aparece como uma sala, e cada sessão é representada por um personagem com nome próprio. ') +
+  tr('Subagentes entram como membros temporários da equipe, trabalham na mesma sala e deixam o escritório quando concluem. ') +
+  tr('A Ajuda explica os estados, os controles, o feed e as informações de conta sem alterar a sessão.');
 
 const SHORTCUTS: [string[], string][] = [
   [['/'], tr('Buscar agente, projeto ou conta')],
@@ -128,11 +127,14 @@ export class HelpDialog {
         'div',
         { class: 'ui-dialog__body' },
         h('section', { class: 'ui-help__intro' }, h('p', { text: INTRO })),
+        this.navigationSection(),
+        this.feedSection(),
         h('section', {}, h('h3', { text: 'Status' }), statusList),
         h('section', {}, h('h3', { text: tr('Atividades') }), iconList),
         this.shellSection(),
         this.socialSection(),
         this.githubSection(),
+        this.appearanceSection(),
         h(
           'section',
           {},
@@ -144,16 +146,13 @@ export class HelpDialog {
             h('li', { text: tr('Clique em um personagem ou sala para ver os detalhes; duplo clique aproxima a câmera.') }),
             h('li', { text: tr('Passe o mouse sobre um personagem para ver o que ele está fazendo.') }),
             h('li', {
-              text: tr('Nos detalhes de um agente, “Abrir terminal” mostra a conversa da sessão como no Claude Code (ou no Codex), ao vivo (precisa do acesso local, bind 127.0.0.1).'),
+              text: tr('Quando disponível, “Abrir terminal” mostra a conversa da sessão. Se a fonte não oferecer essa visualização, o botão fica indisponível ou informa a limitação.'),
             }),
             h('li', {
-              text: tr('Com o plugin habblaud-mensagens (npm run mod:install), dá para mandar mensagens ao agente principal pelos detalhes dele ou pela caixa no rodapé do terminal: o texto entra na sessão como se você o tivesse digitado. Enter manda, Shift+Enter quebra a linha.'),
+              text: tr('Perguntas e pedidos de permissão aparecem com os controles disponíveis para aquela sessão. A resposta segue pelo controle indicado na própria interface.'),
             }),
             h('li', {
-              text: tr('No terminal: busca (lupa ou Ctrl/⌘+F), filtro “Tudo / Só prompts / Sem ferramentas” e um botão de copiar em cada entrada. O relógio da barra superior abre o histórico das sessões dos últimos 7 dias, inclusive as já encerradas.'),
-            }),
-            h('li', {
-              text: tr('Com o mod do Habblaud instalado (npm run mod:install, que inclui o plugin de permissões), quem “pede permissão” mostra nos detalhes o comando ou a edição e os botões Aprovar, Recusar e Responder no terminal; quem faz uma pergunta mostra as opções (e um “Outro” para escrever) para responder por aqui. O diálogo continua no terminal: vale o que você responder primeiro.'),
+              text: tr('No terminal aberto, a busca, os filtros da conversa e o botão de copiar ficam disponíveis quando suportados pela sessão. O relógio da barra superior abre o histórico das sessões que o aplicativo recebeu.'),
             }),
           ),
           shortcuts,
@@ -183,56 +182,98 @@ export class HelpDialog {
     });
   }
 
-  /** Legenda da espera por shell: a "escalada cômica" do personagem conforme o shell demora. */
+  private navigationSection(): HTMLElement {
+    return h(
+      'section',
+      {},
+      h('h3', { text: tr('Navegação e painéis') }),
+      h(
+        'ul',
+        { class: 'ui-help__list' },
+        h('li', { text: tr('A barra de câmera oferece Escritório, Salas, Seguir e Padrão. O seletor escolhe um projeto com agentes; ‹ e › percorrem os projetos, e o conjunto se adapta ao espaço disponível em janelas menores.') }),
+        h('li', { text: tr('A barra lateral reúne projetos e agentes. Use a busca, os filtros “Em andamento” e “Recentes” e o filtro por conta para encontrar uma sessão.') }),
+        h('li', { text: tr('Os subagentes ficam sempre visíveis abaixo do agente principal. O resumo mostra quantos trabalham, executam comandos ou precisam de você.') }),
+        h('li', { text: tr('Ao lado da busca, “Adicionar projeto” abre a escolha de uma pasta. A pasta adicionada aparece como uma sala, inclusive quando não há agentes nela.') }),
+        h('li', { text: tr('A barra lateral, o feed e a gaveta de detalhes podem ser abertos ou fechados. As alças nas bordas permitem redimensionar os painéis, e o layout se ajusta quando a janela fica estreita.') }),
+      ),
+    );
+  }
+
+  private feedSection(): HTMLElement {
+    return h(
+      'section',
+      {},
+      h('h3', { text: tr('Feed de atividade') }),
+      h(
+        'ul',
+        { class: 'ui-help__list' },
+        h('li', { text: tr('Use “Importantes” para acompanhar os eventos principais ou “Tudo” para ver toda a atividade recebida.') }),
+        h('li', { text: tr('O escopo pode ser “Todos”, o projeto atual ou o agente atual. O filtro por conta da barra lateral também afeta o feed.') }),
+        h('li', { text: tr('Eventos semelhantes que acontecem próximos uns dos outros são agrupados em uma linha; o número de repetições aparece ao lado.') }),
+        h('li', { text: tr('Abra “Detalhes completos do evento” para consultar o texto original, a ferramenta e os detalhes recebidos.') }),
+      ),
+    );
+  }
+
+  private appearanceSection(): HTMLElement {
+    return h(
+      'section',
+      {},
+      h('h3', { text: tr('Aparência') }),
+      h(
+        'ul',
+        { class: 'ui-help__list' },
+        h('li', { text: tr('Automático: usa Halloween em outubro e Natal de novembro a 26 de dezembro.') }),
+        h('li', { text: tr('Nenhum: mantém o escritório jurídico sem decoração sazonal.') }),
+        h('li', { text: tr('Natal e Halloween: aplicam a decoração temática correspondente sobre a mesma ambientação jurídica.') }),
+        h('li', { text: tr('As peças escolhidas no editor de personagens são preservadas em qualquer uma das quatro opções.') }),
+      ),
+    );
+  }
+
+  /** Explica o estado de espera por um comando do terminal. */
   private shellSection(): HTMLElement {
     const item = (emoji: string, text: string) =>
       h('li', {}, h('span', { class: 'ui-icon-legend__icon', text: emoji, attrs: { 'aria-hidden': 'true' } }), h('span', { text }));
     return h(
       'section',
       { class: 'ui-help__shell' },
-      h('h3', { text: tr('Esperando o shell') }),
+      h('h3', { text: tr('Comando em execução') }),
       h('p', {
         class: 'ui-help__lead',
-        text:
-          tr('Quando o agente termina o turno com um comando rodando em segundo plano (ou fica mais de 10 s parado num comando), ele não sai para passear: ') +
-          tr('fica na mesa com a ampulheta virando, o monitor mostra o progresso e um balão diz qual shell ele espera e há quanto tempo. Quanto mais demora…'),
+        text: tr('Quando o turno termina enquanto um comando continua em execução, o agente permanece na mesa lendo documentos. O estado mostra o comando esperado e o tempo de espera; quando o comando termina, a sessão recebe o resultado.'),
       }),
-      h('ul', { class: 'ui-shell-legend' }, ...SHELL_STAGES.map((s) => item(s.emoji, s.help)), ...SHELL_END_HELP.map(([e, t]) => item(e, t))),
+      h('ul', { class: 'ui-shell-legend' }, ...SHELL_WAIT_HELP.map(([e, t]) => item(e, t)), ...SHELL_END_HELP.map(([e, t]) => item(e, t))),
     );
   }
 
-  /** Legenda da vida social: as rodas dos ociosos, as personalidades e as moedinhas. */
+  /** Legenda das áreas comuns e das discussões da Sala de Convivência. */
   private socialSection(): HTMLElement {
     const item = (emoji: string, text: string) =>
       h('li', {}, h('span', { class: 'ui-icon-legend__icon', text: emoji, attrs: { 'aria-hidden': 'true' } }), h('span', { text }));
     return h(
       'section',
       { class: 'ui-help__shell' },
-      h('h3', { text: tr('Vida social') }),
+      h('h3', { text: tr('Áreas comuns e Sala de Convivência') }),
       h('p', {
         class: 'ui-help__lead',
-        text:
-          tr('Quando dois ou mais agentes estão à toa (ociosos, ou esperando um shell há mais de 40 s), eles se juntam. Cada um tem 2 ou 3 traços de personalidade ') +
-          tr('(competição, fofoca, vaidade, sonecas…), amizades e rivalidades, e isso decide o que preferem fazer, com quem e o que falam. ') +
-          tr('Os detalhes do agente mostram a personalidade, a carteira e o extrato; as partidas e apostas aparecem no feed.'),
+        text: tr('Quando não há trabalho imediato, os agentes podem fazer uma pausa nas áreas comuns ou conversar na Sala de Convivência. Uma nova instrução os chama de volta ao trabalho.'),
       }),
       h('ul', { class: 'ui-shell-legend' }, ...SOCIAL_HELP.map(([e, t]) => item(e, t))),
     );
   }
 
-  /** Legenda do GitHub no escritório: festa e alarme nas salas. */
+  /** Legenda de eventos de integração apresentados no feed. */
   private githubSection(): HTMLElement {
     const item = (emoji: string, text: string) =>
       h('li', {}, h('span', { class: 'ui-icon-legend__icon', text: emoji, attrs: { 'aria-hidden': 'true' } }), h('span', { text }));
     return h(
       'section',
       { class: 'ui-help__shell' },
-      h('h3', { text: tr('GitHub no escritório') }),
+      h('h3', { text: tr('Eventos de integração') }),
       h('p', {
         class: 'ui-help__lead',
-        text:
-          tr('O que os agentes fazem no GitHub (gh pr create/merge, git push, gh run watch, gh pr checks, gh release create e o MCP do GitHub) vira aviso, ') +
-          tr('entra no feed e anima a sala do projeto. Só o que acontece ao vivo: o que já estava nos transcripts quando o Habblaud abriu fica só no histórico.'),
+        text: tr('Quando uma integração conectada fornece eventos de repositório ou CI, eles podem aparecer como avisos no feed. A Ajuda explica a apresentação; qualquer ação continua no serviço de origem.'),
       }),
       h('ul', { class: 'ui-shell-legend' }, ...GITHUB_HELP.map(([e, t]) => item(e, t))),
     );
@@ -246,10 +287,10 @@ export class HelpDialog {
       h(
         'ul',
         { class: 'ui-help__list' },
-        h('li', { text: tr('O chip colorido com a letra (C, D…) mostra de qual conta do Claude Code é cada agente: cada atalho de terminal usa uma pasta de configuração diferente.') }),
-        h('li', {}, accountSample('C', '#f08a3c'), tr(' Conta do Claude Code · '), accountSample('X', '#a77bf3', true), tr(' Conta do Codex (chip vazado, com o selo CODEX onde há espaço).')),
+        h('li', { text: tr('O logotipo identifica Claude ou ChatGPT. A cor da borda e o nome distinguem as contas de cada provedor.') }),
+        h('li', {}, accountSample('C', '#f08a3c'), tr(' Claude Code · '), accountSample('X', '#a77bf3', true), tr(' ChatGPT. Cada provedor aparece com seu próprio logotipo.')),
         h('li', {
-          text: tr('No topo, cada conta mostra o uso da sessão de 5 horas e da semana. O ↻ indica quando cada limite reinicia (contagem regressiva se faltar menos de um dia). Verde abaixo de 50%, âmbar até 80% e vermelho a partir daí.'),
+          text: tr('No topo, cada conta mostra as janelas de uso que o provedor informa. Quando houver, aparecem a sessão de 5 horas e a semana; o ↻ indica quando cada limite reinicia. Verde significa menos de 50%, âmbar até 80% e vermelho a partir daí.'),
         }),
         h('li', { text: tr('Números antigos ficam acinzentados com a idade ao lado (ex.: “há 3 h”); uma janela que já reiniciou desde a leitura mostra “—” e “renovada”.') }),
       ),
@@ -260,12 +301,12 @@ export class HelpDialog {
     return el;
   }
 
-  /** O Codex no escritório (o "Como funciona" do cartão de uso de uma conta do Codex abre aqui). */
+  /** O provedor ChatGPT no escritório (o "Como funciona" do cartão de uso abre aqui). */
   private codexSection(): HTMLElement {
     const el = h(
       'section',
       { class: 'ui-help__usage', attrs: { 'aria-labelledby': 'ui-help-codex' } },
-      h('h3', { text: 'Codex', tabIndex: -1, attrs: { id: 'ui-help-codex' } }),
+      h('h3', { text: 'ChatGPT', tabIndex: -1, attrs: { id: 'ui-help-codex' } }),
       h('ul', { class: 'ui-help__list' }, ...CODEX_HELP.map((text) => h('li', {}, ...richText(text)))),
     );
     this.sections.set('codex', el);
@@ -280,7 +321,7 @@ export class HelpDialog {
 /** Um chip de conta de exemplo (legenda). */
 function accountSample(short: string, color: string, codex = false): HTMLElement {
   const chip = createAccountChip('sm');
-  updateAccountChip(chip, { id: short, short, name: codex ? 'Codex' : tr('Conta {0}', [short]), color, configDir: '', sessions: 0, usageStatus: 'disabled', ...(codex ? { provider: 'codex' as const } : {}) });
+  updateAccountChip(chip, { id: short, short, name: codex ? 'ChatGPT' : tr('Conta {0}', [short]), color, configDir: '', sessions: 0, usageStatus: 'disabled', ...(codex ? { provider: 'codex' as const } : {}) });
   chip.setAttribute('aria-hidden', 'true');
   return chip;
 }

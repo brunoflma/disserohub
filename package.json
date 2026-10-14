@@ -1,14 +1,18 @@
 {
   "name": "habblaud",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "private": true,
-  "description": "Escritório virtual animado que mostra, em tempo real, o que seus agentes do Claude Code estão fazendo.",
+  "description": "DisseroHub: ambiente visual de trabalho do Dissero, baseado no Habblaud.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/marmottajr/habblaud.git"
+    "url": "git+https://github.com/brunoflma/disserohub.git"
   },
-  "homepage": "https://github.com/marmottajr/habblaud#readme",
+  "homepage": "https://github.com/brunoflma/disserohub#readme",
+  "disserohub": {
+    "upstreamRepository": "marmottajr/habblaud",
+    "upstreamVersion": "0.11.0"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.12"

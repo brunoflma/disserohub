@@ -145,16 +145,16 @@ type DemoAccount = Omit<AccountInfo, 'sessions' | 'usage' | 'usageStatus'>;
 // No ?mock=1 as contas imitam o cenário real (C e D no Claude Code, mais uma do Codex). Misturado aos dados reais
 // no servidor (idPrefix), o demo usa contas próprias, inconfundíveis com as de verdade.
 const DEMO_ACCOUNTS: DemoAccount[] = [
-  { id: '.claude', short: 'C', name: 'Conta C', email: 'dev@empresa.example', organization: tr('Empresa'), plan: 'Max', color: '#f08a3c', configDir: '~/.claude' },
-  { id: '.claude-conta2', short: 'D', name: 'Conta D', email: 'dev@pessoal.example', plan: 'Max', color: '#4aa8e8', configDir: '~/.claude-conta2' },
+  { id: '.claude', short: 'C', name: 'Claude C', email: 'dev@empresa.example', organization: tr('Empresa'), plan: 'Max', color: '#f08a3c', configDir: '~/.claude' },
+  { id: '.claude-conta2', short: 'D', name: 'Claude D', email: 'dev@pessoal.example', plan: 'Max', color: '#4aa8e8', configDir: '~/.claude-conta2' },
 ];
 /** Conta do Codex (um CODEX_HOME): sem e-mail (o Habblaud não lê credenciais), com o plano dos `rate_limits`. */
-const DEMO_CODEX_ACCOUNT: DemoAccount = { id: '.codex', provider: 'codex', short: 'X', name: 'Codex', plan: 'Team', color: '#a77bf3', configDir: '~/.codex' };
+const DEMO_CODEX_ACCOUNT: DemoAccount = { id: '.codex', provider: 'codex', short: 'X', name: 'ChatGPT', plan: 'Team', color: '#a77bf3', configDir: '~/.codex' };
 const MERGED_ACCOUNTS: Array<Pick<DemoAccount, 'short' | 'name' | 'color'>> = [
   { short: 'X', name: 'Demo X', color: '#5cc97b' },
   { short: 'Y', name: 'Demo Y', color: '#a77bf3' },
 ];
-const MERGED_CODEX_ACCOUNT: Pick<DemoAccount, 'short' | 'name' | 'color'> = { short: 'Z', name: 'Demo Codex', color: '#f06fa0' };
+const MERGED_CODEX_ACCOUNT: Pick<DemoAccount, 'short' | 'name' | 'color'> = { short: 'Z', name: 'Demo ChatGPT', color: '#f06fa0' };
 const HOUR = 3_600_000;
 const MINUTE = 60_000;
 /** Uso do Codex com mais de 30 min (sem sessão rodando) aparece como antigo, como no servidor. */
@@ -434,11 +434,11 @@ export class DemoSimulator {
       return true;
     }
     if (answers) {
-      this.activity(a, now, { kind: 'other', icon: '💬', text: tr('Respondido no Habblaud'), detail: answerSummary(p.questions ?? [], answers), tool: 'PermissionRequest' });
+      this.activity(a, now, { kind: 'other', icon: '💬', text: tr('Respondido no Dissero'), detail: answerSummary(p.questions ?? [], answers), tool: 'PermissionRequest' });
     } else if (d.behavior === 'allow') {
-      this.activity(a, now, { kind: 'other', icon: '✅', text: d.suggestion !== undefined ? tr('Aprovado no Habblaud (sempre permitir)') : tr('Aprovado no Habblaud'), detail: title, tool: 'PermissionRequest' });
+      this.activity(a, now, { kind: 'other', icon: '✅', text: d.suggestion !== undefined ? tr('Aprovado no Dissero (sempre permitir)') : tr('Aprovado no Dissero'), detail: title, tool: 'PermissionRequest' });
     } else {
-      this.activity(a, now, { kind: 'wait', icon: '🚫', text: tr('Recusado no Habblaud'), detail: d.message ? `${title} — ${d.message}` : title, tool: 'PermissionRequest' });
+      this.activity(a, now, { kind: 'wait', icon: '🚫', text: tr('Recusado no Dissero'), detail: d.message ? `${title} — ${d.message}` : title, tool: 'PermissionRequest' });
     }
     this.resumeFromWaiting(a, now);
     return true;

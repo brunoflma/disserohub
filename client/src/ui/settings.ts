@@ -8,30 +8,7 @@ import type { UiPrefs } from './prefs';
 import { SoundSettingsGroup } from './settings-sound';
 import type { SoundControl } from './sound';
 import { AboutGroup } from './version';
-import { LOCALE_STORAGE_KEY, LOCALES, normalizeLocale, tr, type Locale } from '../../../shared/i18n';
-
-type LanguageChoice = 'auto' | Locale;
-
-/** Idioma escolhido nas Configurações ("auto" = o do navegador). */
-function savedLanguage(): LanguageChoice {
-  try {
-    return normalizeLocale(localStorage.getItem(LOCALE_STORAGE_KEY)) ?? 'auto';
-  } catch {
-    return 'auto';
-  }
-}
-
-/** Salva a escolha e recarrega: os textos são montados uma vez, ao carregar a página. */
-function pickLanguage(v: LanguageChoice): void {
-  if (v === savedLanguage()) return;
-  try {
-    if (v === 'auto') localStorage.removeItem(LOCALE_STORAGE_KEY);
-    else localStorage.setItem(LOCALE_STORAGE_KEY, v);
-  } catch {
-    return;
-  }
-  location.reload();
-}
+import { tr } from '../../../shared/i18n';
 
 type BoolPref = { [K in keyof UiPrefs]: UiPrefs[K] extends boolean ? K : never }[keyof UiPrefs];
 
@@ -87,7 +64,6 @@ export class SettingsPopover implements UiComponent {
   private liveliness: ReturnType<typeof segmented<UiPrefs['liveliness']>>;
   private daylight: ReturnType<typeof segmented<UiPrefs['daylight']>>;
   private theme: ReturnType<typeof segmented<UiPrefs['theme']>>;
-  private language: ReturnType<typeof segmented<LanguageChoice>>;
   private soundGroup: SoundSettingsGroup;
   private demoGroup: HTMLElement;
   /** Só na página do celular (porta remota com login): sair deste aparelho. */
@@ -142,18 +118,8 @@ export class SettingsPopover implements UiComponent {
       [['auto', tr('Automático')], ['none', tr('Nenhum')], ['christmas', tr('Natal')], ['halloween', tr('Halloween')]],
       (v) => ctx.updatePrefs({ theme: v }),
     );
-    this.theme.row.append(h('span', { class: 'ui-set__hint', text: tr('Automático: Halloween em outubro e Natal de 1º de novembro a 26 de dezembro; no resto do ano, o visual original. Nenhum: sempre o original.') }));
+    this.theme.row.append(h('span', { class: 'ui-set__hint', text: tr('Automático: Halloween em outubro e Natal de novembro a 26 de dezembro. Nenhum: escritório jurídico sem decoração sazonal. Natal e Halloween: decoração temática sobre a mesma ambientação. As peças escolhidas no editor de personagens são preservadas.') }));
     this.soundGroup = new SoundSettingsGroup(ctx, sound);
-
-    // Nomes dos idiomas sempre na própria língua, para quem não entende o idioma atual achar o seu.
-    this.language = segmented<LanguageChoice>(
-      tr('Idioma da interface'),
-      [['auto', tr('Automático')], ...LOCALES.map((l): [LanguageChoice, string] => [l.id, l.name])],
-      (v) => pickLanguage(v),
-    );
-    this.language.row.append(
-      h('span', { class: 'ui-set__hint', text: tr('Os textos das atividades vêm do servidor: seguem HABBLAUD_LANG ou o idioma do sistema onde o Habblaud roda (o inglês, só com HABBLAUD_LANG=en).') }),
-    );
 
     this.demoGroup = h(
       'div',
@@ -196,6 +162,7 @@ export class SettingsPopover implements UiComponent {
         this.bubbles.row,
         this.liveliness.row,
         this.daylight.row,
+        sw('economy', tr('Modo econômico'), tr('Desenha o escritório a 30 quadros por segundo. Dados, perguntas e avisos continuam atualizados.'), flip('economy')),
       ),
       h(
         'div',
@@ -204,7 +171,6 @@ export class SettingsPopover implements UiComponent {
         sw('browserNotifications', tr('Notificações do navegador'), tr('Avisa quando alguém precisa de você e a aba está em segundo plano.'), () => void this.toggleNotifications()),
       ),
       this.soundGroup.el,
-      h('div', { class: 'ui-set-group' }, h('h3', { text: tr('Idioma') }), this.language.row),
       this.demoGroup,
       this.remoteGroup,
       this.about.el,
@@ -276,7 +242,6 @@ export class SettingsPopover implements UiComponent {
     this.liveliness.set(p.liveliness);
     this.daylight.set(p.daylight);
     this.theme.set(p.theme);
-    this.language.set(savedLanguage());
     this.soundGroup.render();
     setHidden(this.demoGroup, this.ctx.store.mock || access().remote);
     setHidden(this.remoteGroup, !access().remote);

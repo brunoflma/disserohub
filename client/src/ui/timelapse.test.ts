@@ -23,6 +23,8 @@ vi.mock('./toasts');
 vi.mock('./version');
 vi.mock('./update');
 vi.mock('./viewport');
+vi.mock('../local/camera-tools');
+vi.mock('../local/panel-resizer', () => ({ panelResizer: () => () => {} }));
 vi.mock('./topbar', () => ({ TopBar: class {
   panelGroup = { prepend() {} };
   addPanelButton() {}
@@ -81,6 +83,8 @@ describe('timelapse: relógio dos painéis', () => {
       addEventListener() {},
     });
     vi.stubGlobal('addEventListener', () => {});
+    vi.stubGlobal('innerWidth', 1440);
+    vi.stubGlobal('innerHeight', 900);
     vi.stubGlobal('requestAnimationFrame', (cb: () => void) => setTimeout(cb, 16));
     vi.stubGlobal('cancelAnimationFrame', (id: ReturnType<typeof setTimeout>) => clearTimeout(id));
     const records = [

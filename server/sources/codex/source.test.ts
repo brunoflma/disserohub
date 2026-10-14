@@ -1,5 +1,5 @@
 // Integração da fonte do Codex: um CODEX_HOME temporário (rollouts e locks sintéticos), o AccountsService e o Office.
-import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -7,7 +7,7 @@ import type { AgentInfo, Notice } from '../../../shared/types';
 import { AccountsService } from '../../accounts/service';
 import { log, setQuiet } from '../../log';
 import { NameStore } from '../../model/names';
-import { Office } from '../../model/office';
+import { IDLE_PRESENCE_MS, Office } from '../../model/office';
 import { codexHome, R, SOURCES, threadId } from '../../test/codex-fixtures';
 import { MAX_LINE_BYTES } from '../tail';
 import { CodexSource, scanPrefix } from './source';
@@ -24,7 +24,7 @@ afterEach(() => {
   cleanups = [];
 });
 
-function setup(opts: { names?: string[]; noLocks?: boolean; env?: (dirs: string[]) => NodeJS.ProcessEnv } = {}) {
+function setup(opts: { names?: string[]; noLocks?: boolean; tailBytes?: number; env?: (dirs: string[]) => NodeJS.ProcessEnv } = {}) {
   const homes = (opts.names ?? ['.codex']).map((n) => codexHome(n));
   const home = homes[0];
   cleanups.push(...homes.map((h) => h.cleanup));
@@ -44,7 +44,7 @@ function setup(opts: { names?: string[]; noLocks?: boolean; env?: (dirs: string[
   });
   late.office = office;
   const dirs = homes.map((h) => h.dir);
-  const source = new CodexSource({ accounts, office, dirs, env: opts.env?.(dirs) ?? {}, home: home.home, now, watch: false });
+  const source = new CodexSource({ accounts, office, dirs, env: opts.env?.(dirs) ?? {}, home: home.home, now, watch: false, tailBytes: opts.tailBytes });
   // Para antes de apagar as pastas (nenhum ciclo agendado roda depois).
   cleanups.unshift(() => source.stop());
   const notices: Notice[] = [];
@@ -108,7 +108,7 @@ describe('fonte do Codex: presença pelos locks', () => {
     expect(ctx.source.sources()).toEqual([{ label: '.codex', provider: 'codex', path: ctx.home.dir, sessions: 1, ok: true }]);
     expect(ctx.source.transcriptPathOf(KEY)).toBe(path);
     expect(ctx.source.terminalParser(KEY)).toBeDefined();
-    expect(ctx.accounts.list(new Map())[0]).toMatchObject({ id: '.codex', provider: 'codex', name: 'Codex', short: 'X' });
+    expect(ctx.accounts.list(new Map())[0]).toMatchObject({ id: '.codex', provider: 'codex', name: 'ChatGPT', short: 'X' });
 
     // Turno concluído: ociosa.
     ctx.advance(1_000);
@@ -223,7 +223,7 @@ describe('fonte do Codex: presença pelos locks', () => {
     expect(ctx.agent()).toMatchObject({ status: 'working', title: 'Turno atual' });
   });
 
-  it('lock rápido (manutenção) não vira sessão; o que persiste uns segundos, vira', () => {
+  it('lock rápido não vira sessão; lock persistente carrega o histórico sem exibir conversa ociosa antiga', () => {
     const ctx = setup();
     ctx.home.rollout(T, [R.meta(T, { at: ctx.now() - 3_600_000 }), R.user(T, 't', 'u', 'antiga', ctx.now() - 3_600_000)], { mtime: ctx.now() - 3_600_000 });
     ctx.source.boot();
@@ -236,13 +236,14 @@ describe('fonte do Codex: presença pelos locks', () => {
     ctx.advance(1_000);
     ctx.poll();
     expect(ctx.agent()).toBeUndefined();
-    // Retomada de verdade: o lock fica.
+    // Carregar uma conversa antiga não conta como trabalho novo.
     ctx.home.lock(T, ctx.now());
     ctx.poll();
     expect(ctx.agent()).toBeUndefined();
     ctx.advance(3_500);
     ctx.poll();
-    expect(ctx.agent()?.status).toBe('idle');
+    expect(ctx.office.get(KEY)?.status).toBe('idle');
+    expect(ctx.agent()).toBeUndefined();
   });
 
   it('lock velho de crash (rollout parado há mais de 12 h, sem hook) fica fora; escrita nova reabre', () => {
@@ -258,17 +259,46 @@ describe('fonte do Codex: presença pelos locks', () => {
     expect(ctx.agent()).toMatchObject({ status: 'working' });
   });
 
-  it('thread antigo retomado agora (lock novo, rollout parado há dias) aparece', () => {
+  it('thread antigo carregado (lock novo, rollout parado há dias) só aparece com atividade nova', () => {
     const ctx = setup();
     const old = ctx.now() - 3 * 86_400_000;
-    ctx.home.rollout(T, [R.meta(T, { at: old, cwd: '/projetos/velho' }), R.user(T, 't', 'u', 'antigo', old), R.taskComplete('t', old + 10)], { mtime: old });
+    const path = ctx.home.rollout(T, [R.meta(T, { at: old, cwd: '/projetos/velho' }), R.user(T, 't', 'u', 'antigo', old), R.taskComplete('t', old + 10)], { mtime: old });
     ctx.home.lock(T, ctx.now() - 30_000);
     ctx.source.boot();
-    expect(ctx.agent()).toMatchObject({ roomId: '/projetos/velho', status: 'idle', title: 'antigo' });
+    expect(ctx.agent()).toBeUndefined();
+    expect(ctx.office.get(KEY)).toMatchObject({ roomId: '/projetos/velho', status: 'idle', title: 'antigo', statusSince: old + 10 });
+    expect(ctx.office.commit().snapshot.rooms).toEqual([]);
+    ctx.home.append(path, [R.taskStarted('t2', ctx.now()), R.user(T, 't2', 'u2', 'voltei', ctx.now())]);
+    ctx.poll();
+    expect(ctx.agent()).toMatchObject({ roomId: '/projetos/velho', status: 'working', title: 'antigo' });
     // Lock sem rollout esquecido há mais de 12 h (crash antes do primeiro prompt): fora.
     ctx.home.lock(C, ctx.now() - 13 * 3600_000);
     ctx.poll();
     expect(ctx.agent(`.codex:${C}`)).toBeUndefined();
+  });
+
+  it('turno concluído sai em 15 min apesar do lock; polling não renova e o próximo prompt reaparece', () => {
+    const ctx = setup();
+    const at = ctx.now();
+    const path = ctx.home.rollout(T, [R.meta(T, { at: at - 60_000 }), R.taskStarted('t', at - 50_000), R.user(T, 't', 'u', 'testar', at - 49_000), R.taskComplete('t', at)]);
+    ctx.home.lock(T, at - 60_000);
+    ctx.source.boot();
+    const original = ctx.agent()!;
+    expect(original.statusSince).toBe(at);
+    ctx.advance(IDLE_PRESENCE_MS - 1);
+    ctx.poll();
+    expect(ctx.agent()).toBeDefined();
+    ctx.advance(1);
+    ctx.poll();
+    expect(ctx.agent()).toBeUndefined();
+    expect(ctx.office.commit().snapshot.rooms).toEqual([]);
+    expect(ctx.source.transcriptPathOf(KEY)).toBe(path);
+    ctx.advance(3 * 3600_000);
+    ctx.poll();
+    expect(ctx.agent()).toBeUndefined();
+    ctx.home.append(path, [R.taskStarted('t2', ctx.now()), R.user(T, 't2', 'u2', 'mais testes', ctx.now())]);
+    ctx.poll();
+    expect(ctx.agent()).toMatchObject({ id: original.id, name: original.name, status: 'working' });
   });
 
   it('lock sem rollout (CLI aberta, ainda sem mensagem): fica fora até o projeto aparecer e entra direto na sala dele', () => {
@@ -482,6 +512,36 @@ describe('fonte do Codex: eventos de hook', () => {
     expect(ctx.agent(`.codex:${C}`)?.status).toBe('done');
   });
 
+  it('sub concluído não retorna por PostToolUse/compactação atrasados, antes ou depois de sair', () => {
+    const ctx = setup();
+    ctx.source.boot();
+    ctx.hook(ev('SessionStart'));
+    ctx.hook(ev('SubagentStart', { agent_id: C, agent_type: 'worker' }));
+    ctx.hook(ev('SubagentStop', { agent_id: C }));
+    for (const delay of [1_000, 30_000]) {
+      ctx.advance(delay);
+      ctx.poll();
+      for (const event of ['PostToolUse', 'PreCompact', 'PostCompact']) {
+        ctx.hook(ev(event, { agent_id: C, tool_name: 'Bash', tool_use_id: 'late', tool_response: {} }));
+        expect(ctx.agent(`.codex:${C}`)?.status).not.toBe('working');
+      }
+    }
+    expect(ctx.agent(`.codex:${C}`)).toBeUndefined();
+    ctx.hook(ev('SubagentStart', { agent_id: C, agent_type: 'worker' }));
+    expect(ctx.agent(`.codex:${C}`)?.status).toBe('working');
+  });
+
+  it('sub descoberto durante aprovação continua trabalhando quando o comando termina', () => {
+    const ctx = setup();
+    ctx.source.boot();
+    ctx.hook(ev('SessionStart'));
+    // O hook inicial não chegou: aprovação e resultado bastam para acompanhar trabalho real.
+    ctx.hook(ev('PermissionRequest', { agent_id: C, tool_name: 'Bash', tool_input: { command: 'npm test' } }));
+    expect(ctx.agent(`.codex:${C}`)?.status).toBe('waiting');
+    ctx.hook(ev('PostToolUse', { agent_id: C, tool_name: 'Bash', tool_use_id: 'approved', tool_response: {} }));
+    expect(ctx.agent(`.codex:${C}`)?.status).toBe('working');
+  });
+
   it('evento desconhecido, sessão inválida ou sem conta que case: false', () => {
     const ctx = setup({ names: ['.codex', '.codex-trabalho'] });
     ctx.source.boot();
@@ -573,13 +633,170 @@ describe('fonte do Codex: eventos de hook', () => {
   });
 });
 
+describe('fonte do Codex: perguntas', () => {
+  const ev = (name: string, extra: Record<string, unknown> = {}) => ({ hook_event_name: name, session_id: T, cwd: '/projetos/api', ...extra });
+  const input = { questions: [{ title: 'Pode verificar o navegador?', options: ['Pronto', 'Preciso de tempo'] }] };
+  const answer = (callId: string) => `<send_user_message_question_reply>\n${JSON.stringify([{ questionItemId: JSON.stringify(['request_user_input_async', callId, 0]), answer: 'Pronto' }])}\n</send_user_message_question_reply>`;
+
+  it('pergunta ao vivo gera chamada, contador e conteúdo, permanecendo durante trabalho até a resposta', () => {
+    const ctx = setup();
+    const at = ctx.now();
+    const path = ctx.home.rollout(T, [R.meta(T, { at: at - 60_000 }), R.taskStarted('turn', at - 50_000)]);
+    ctx.home.lock(T, at - 60_000);
+    ctx.source.boot();
+    ctx.advance(100);
+    ctx.home.append(path, [R.functionCall('ask', 'request_user_input_async', input, ctx.now()), R.functionOutput('ask', '{"accepted":true}', ctx.now() + 1)]);
+    ctx.poll();
+    expect(ctx.agent()).toMatchObject({ status: 'waiting', waitingFor: 'responder uma pergunta no Codex', pendingQuestions: [{ questions: [{ question: 'Pode verificar o navegador?' }] }] });
+    expect(ctx.agents().filter((a) => a.status === 'waiting')).toHaveLength(1);
+    expect(ctx.notices.some((n) => n.level === 'alert' && n.agentId === KEY && n.text.includes('precisa de você'))).toBe(true);
+    ctx.advance(3 * 3600_000);
+    ctx.home.append(path, [R.command(T, 'turn', 'other', 'npm test', { at: ctx.now() })]);
+    ctx.poll();
+    expect(ctx.agent()).toMatchObject({ status: 'waiting', pendingQuestions: [{ id: `${KEY}#ask` }] });
+    ctx.advance(100);
+    ctx.home.append(path, [R.message('user', answer('ask'), ctx.now()), R.user(T, 'turn', 'reply-duplicate', answer('ask'), ctx.now() + 1), R.taskComplete('turn', ctx.now() + 2)]);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('idle');
+    expect(ctx.agent()?.pendingQuestions).toBeUndefined();
+    expect(ctx.agents().filter((a) => a.status === 'waiting')).toHaveLength(0);
+    expect(ctx.office.detail(KEY)?.history.some((a) => a.detail?.includes('send_user_message_question_reply'))).toBe(false);
+    ctx.advance(IDLE_PRESENCE_MS - 1);
+    ctx.poll();
+    expect(ctx.agent()).toBeDefined();
+    ctx.advance(1);
+    ctx.poll();
+    expect(ctx.agent()).toBeUndefined();
+  });
+
+  it('reconstrói a pergunta pendente no boot e não confunde accepted com resposta', () => {
+    const ctx = setup();
+    const at = ctx.now();
+    ctx.home.rollout(T, [R.meta(T, { at: at - 60_000 }), R.taskStarted('turn', at - 50_000), R.functionCall('ask', 'request_user_input_async', input, at - 40_000), R.functionOutput('ask', '{"accepted":true}', at - 39_000), R.command(T, 'turn', 'other', 'npm test', { at: at - 30_000 })]);
+    ctx.home.lock(T, at - 60_000);
+    ctx.source.boot();
+    expect(ctx.agent()).toMatchObject({ status: 'waiting', pendingQuestions: [{ questions: [{ question: 'Pode verificar o navegador?' }] }] });
+  });
+
+  it('fim do turno retira alerta e pergunta; novo turno não ressuscita o cartão antigo', () => {
+    const ctx = setup();
+    const at = ctx.now();
+    const path = ctx.home.rollout(T, [R.meta(T, { at: at - 60_000 }), R.taskStarted('turn', at - 50_000), R.functionCall('ask', 'request_user_input_async', input, at - 40_000), R.functionOutput('ask', '{"accepted":true}', at - 39_000)]);
+    ctx.home.lock(T, at - 60_000);
+    ctx.source.boot();
+    expect(ctx.agent()?.status).toBe('waiting');
+    ctx.advance(100);
+    ctx.home.append(path, [R.taskComplete('turn', ctx.now())]);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('idle');
+    expect(ctx.agent()?.pendingQuestions).toBeUndefined();
+    ctx.advance(100);
+    ctx.home.append(path, [R.taskStarted('next', ctx.now()), R.command(T, 'next', 'other', 'npm test', { at: ctx.now() + 1 })]);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('working');
+    expect(ctx.agent()?.pendingQuestions).toBeUndefined();
+  });
+
+  it('hook com resposta ao cartão retira imediatamente a pendência sem aguardar o rollout', () => {
+    const ctx = setup();
+    ctx.source.boot();
+    ctx.hook(ev('PreToolUse', { tool_name: 'request_user_input_async', tool_use_id: 'ask', tool_input: input }));
+    ctx.hook(ev('PostToolUse', { tool_name: 'request_user_input_async', tool_use_id: 'ask', tool_response: { accepted: true } }));
+    expect(ctx.agent()?.status).toBe('waiting');
+    ctx.hook(ev('UserPromptSubmit', { prompt: answer('ask') }));
+    expect(ctx.agent()?.status).toBe('working');
+    expect(ctx.agent()?.pendingQuestions).toBeUndefined();
+  });
+
+  it('hook de resposta preserva aprovação de comando e não reabre turno encerrado', () => {
+    const ctx = setup();
+    ctx.source.boot();
+    ctx.hook(ev('PreToolUse', { tool_name: 'request_user_input_async', tool_use_id: 'ask', tool_input: input }));
+    ctx.hook(ev('PermissionRequest', { tool_name: 'Bash', tool_use_id: 'command' }));
+    ctx.hook(ev('UserPromptSubmit', { prompt: answer('ask') }));
+    expect(ctx.agent()).toMatchObject({ status: 'waiting', waitingFor: 'aprovar um comando' });
+    expect(ctx.agent()?.pendingQuestions).toBeUndefined();
+    ctx.hook(ev('Stop'));
+    ctx.hook(ev('UserPromptSubmit', { prompt: answer('ask') }));
+    expect(ctx.agent()?.status).toBe('idle');
+    expect(ctx.agent()?.pendingQuestions).toBeUndefined();
+  });
+
+  it('boot de rollout grande ignora cartões de turnos encerrados no prefixo', async () => {
+    const ctx = setup({ tailBytes: 800 });
+    const at = ctx.now();
+    ctx.home.rollout(T, [R.meta(T, { at: at - 60_000 }), R.taskStarted('old', at - 50_000), R.functionCall('old-ask', 'request_user_input_async', input, at - 40_000), R.functionOutput('old-ask', '{"accepted":true}', at - 39_000), R.taskComplete('old', at - 38_000), R.taskStarted('next', at - 37_000), R.customToolCall('padding', 'exec', '// ' + 'x'.repeat(4000), at - 35_000), R.command(T, 'next', 'other', 'npm test', { at: at - 10_000 })]);
+    ctx.home.lock(T, at - 60_000);
+    ctx.source.boot();
+    await ctx.source.idle();
+    expect(ctx.agent()?.status).toBe('working');
+    expect(ctx.agent()?.pendingQuestions).toBeUndefined();
+  });
+
+  it('resposta encontrada no prefixo não transforma um turno parado em trabalho novo', async () => {
+    const ctx = setup({ tailBytes: 800 });
+    const at = ctx.now();
+    const minutes = 60_000;
+    const path = ctx.home.rollout(T, [R.meta(T, { at: at - 50 * minutes }), R.taskStarted('turn', at - 45 * minutes), R.functionCall('ask', 'request_user_input_async', input, at - 40 * minutes), R.functionOutput('ask', '{"accepted":true}', at - 39 * minutes), R.message('user', answer('ask'), at - 38 * minutes), R.customToolCall('padding', 'exec', '// ' + 'x'.repeat(4000), at - 35 * minutes), R.functionCall('ask', 'request_user_input_async', input, at - 40 * minutes), R.command(T, 'turn', 'other', 'npm test', { at: at - 31 * minutes })]);
+    utimesSync(path, new Date(at - 31 * minutes), new Date(at - 31 * minutes));
+    ctx.home.lock(T, at - 50 * minutes);
+    ctx.source.boot();
+    await ctx.source.idle();
+    expect(ctx.agent()?.status).toBe('idle');
+    expect(ctx.agent()?.pendingQuestions).toBeUndefined();
+  });
+
+  it.each([false, true])('prefixo fora da janela final respeita resposta já lida: respondeu=%s', async (answered) => {
+    const ctx = setup({ tailBytes: 800 });
+    const at = ctx.now();
+    ctx.home.rollout(T, [R.meta(T, { at: at - 60_000 }), R.taskStarted('turn', at - 50_000), R.functionCall('ask', 'request_user_input_async', input, at - 40_000), R.customToolCall('padding', 'exec', '// ' + 'x'.repeat(4000), at - 35_000), R.functionOutput('ask', '{"accepted":true}', at - 30_000), ...(answered ? [R.message('user', answer('ask'), at - 20_000)] : []), R.command(T, 'turn', 'other', 'npm test', { at: at - 10_000 })]);
+    ctx.home.lock(T, at - 60_000);
+    ctx.source.boot();
+    await ctx.source.idle();
+    expect(ctx.agent()?.status).toBe(answered ? 'working' : 'waiting');
+    expect(ctx.agent()?.pendingQuestions?.length ?? 0).toBe(answered ? 0 : 1);
+  });
+
+  it('hooks de pergunta bloqueante e assíncrona preservam perguntas ao concluir outra ferramenta', () => {
+    const ctx = setup();
+    ctx.source.boot();
+    ctx.hook(ev('PreToolUse', { tool_name: 'request_user_input', tool_use_id: 'sync', tool_input: { questions: [{ question: 'Continuar?' }] } }));
+    expect(ctx.agent()?.status).toBe('waiting');
+    ctx.hook(ev('PostToolUse', { tool_name: 'request_user_input', tool_use_id: 'sync', tool_response: { answers: {} } }));
+    expect(ctx.agent()?.status).toBe('working');
+    ctx.hook(ev('PreToolUse', { tool_name: 'request_user_input_async', tool_use_id: 'async', tool_input: input }));
+    ctx.hook(ev('PostToolUse', { tool_name: 'request_user_input_async', tool_use_id: 'async', tool_response: { accepted: true } }));
+    ctx.hook(ev('PreToolUse', { tool_name: 'Bash', tool_use_id: 'other', tool_input: { command: 'npm test' } }));
+    ctx.hook(ev('PostToolUse', { tool_name: 'Bash', tool_use_id: 'other', tool_response: {} }));
+    expect(ctx.agent()).toMatchObject({ status: 'waiting', pendingQuestions: [{ id: `${KEY}#async` }] });
+  });
+
+  it('responder a pergunta não aprova um comando que ainda está esperando autorização', () => {
+    const ctx = setup();
+    const at = ctx.now();
+    const path = ctx.home.rollout(T, [R.meta(T, { at: at - 60_000 }), R.taskStarted('turn', at - 50_000), R.functionCall('ask', 'request_user_input_async', input, at - 40_000), R.functionOutput('ask', '{"accepted":true}', at - 39_000)]);
+    ctx.home.lock(T, at - 60_000);
+    ctx.source.boot();
+    ctx.hook(ev('PermissionRequest', { tool_name: 'Bash', tool_use_id: 'command' }));
+    ctx.advance(100);
+    ctx.home.append(path, [R.message('user', answer('ask'), ctx.now())]);
+    ctx.poll();
+    expect(ctx.agent()).toMatchObject({ status: 'waiting', waitingFor: 'aprovar um comando' });
+    expect(ctx.agent()?.pendingQuestions).toBeUndefined();
+    ctx.advance(100);
+    ctx.home.append(path, [R.command(T, 'turn', 'command', 'npm test', { at: ctx.now() })]);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('working');
+  });
+});
+
 describe('fonte do Codex: contas', () => {
-  it('duas contas: nomes "Codex X", letras e cores sem colidir; ids devolvidos pelo AccountsService', () => {
+  it('duas contas: nomes "ChatGPT X", letras e cores sem colidir; ids devolvidos pelo AccountsService', () => {
     const ctx = setup({ names: ['.codex', '.codex-trabalho'] });
     const list = ctx.accounts.list(new Map());
     expect(list.map((a) => [a.id, a.provider, a.short, a.name])).toEqual([
-      ['.codex', 'codex', 'X', 'Codex X'],
-      ['.codex-trabalho', 'codex', 'T', 'Codex T'],
+      ['.codex', 'codex', 'X', 'ChatGPT X'],
+      ['.codex-trabalho', 'codex', 'T', 'ChatGPT T'],
     ]);
     expect(new Set(list.map((a) => a.color)).size).toBe(2);
     expect(ctx.source.accountEntries().map((e) => e.id)).toEqual(['.codex', '.codex-trabalho']);

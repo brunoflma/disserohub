@@ -2,7 +2,7 @@
 import { access } from '../net/access';
 import { SpawnPanel } from './spawn';
 import type { UiComponent, UiContext } from './context';
-import { h, iconButton, setAttr, setHidden, setText, setTitle, setVariant } from './dom';
+import { h, iconButton, setAttr, setHidden, setStyleVar, setText, setTitle, setVariant } from './dom';
 import { formatDuration, formatInt } from './format';
 import { FALLBACK_MARK, ICONS } from './icons';
 import { computeCounters, shellLine, shellWaitIn, shellWaitingAgents, waitingAgents, type Counters } from './model';
@@ -51,13 +51,9 @@ export class TopBar implements UiComponent {
   readonly panelGroup: HTMLElement;
 
   constructor(private ctx: UiContext) {
-    // Marca: usa o logo do projeto se existir; senão, o prédio em pixels.
+    // Marca oficial Dissero: D aberto.
     const mark = h('span', { class: 'ui-brand__mark' });
-    const logo = h('img', { attrs: { src: '/assets/brand/logo-mark.png', srcset: '/assets/brand/logo-mark@4x.png 4x', alt: '', width: 32, height: 32, draggable: 'false' } });
-    logo.addEventListener('error', () => {
-      mark.innerHTML = FALLBACK_MARK;
-    });
-    mark.append(logo);
+    mark.innerHTML = FALLBACK_MARK;
 
     this.pillText = h('span', { class: 'ui-pill__text' });
     this.pill = h('span', { class: 'ui-pill', role: 'status', attrs: { 'aria-live': 'polite' } }, h('span', { class: 'ui-pill__dot' }), this.pillText);
@@ -145,6 +141,14 @@ export class TopBar implements UiComponent {
       this.usage.el,
       h('div', { class: 'ui-topbar__right' }, viewGroup, panelGroup),
     );
+    // O cabeçalho cresce com as contas e os controles. Os painéis acompanham sua altura real.
+    // O CSS da barra não usa --top-h para a própria altura, evitando realimentação da medida.
+    if (typeof ResizeObserver === 'function') {
+      new ResizeObserver(() => {
+        const height = Math.ceil(this.el.getBoundingClientRect().height);
+        if (height > 0) setStyleVar(ctx.root, '--top-h', `${height}px`);
+      }).observe(this.el);
+    }
   }
 
   /** Acrescenta um botão de janela própria (ex.: Meu dia) ao começo do grupo de painéis. */
@@ -169,7 +173,7 @@ export class TopBar implements UiComponent {
         ? tr('Dados simulados no navegador (?mock=1)')
         : conn === 'open'
           ? tr('Recebendo eventos do servidor em tempo real')
-          : tr('Sem conexão com o servidor do Habblaud'),
+          : tr('Sem conexão com o servidor do Dissero'),
     );
     setHidden(this.demoBadge, !(conn === 'open' && snap?.meta.demo));
 

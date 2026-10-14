@@ -131,17 +131,17 @@ describe('detecção de contas', () => {
     );
     const accs = detectAccounts([join(home, '.claude'), join(home, '.claude-conta2'), join(home, '.claude-vazio')], { home, env: {} });
     expect(accs).toEqual([
-      { id: '.claude', configDir: join(home, '.claude'), short: 'C', name: 'Conta C', color: '#f08a3c', email: 'a@empresa.com', organization: 'Empresa' },
+      { id: '.claude', configDir: join(home, '.claude'), short: 'C', name: 'Claude C', color: '#f08a3c', email: 'a@empresa.com', organization: 'Empresa' },
       {
         id: '.claude-conta2',
         configDir: join(home, '.claude-conta2'),
         short: 'D',
-        name: 'Conta D',
+        name: 'Claude D',
         color: '#4aa8e8',
         email: 'b@pessoal.com',
         cachedUsage: { fetchedAtMs: 1000, utilization: { five_hour: { utilization: 10, resets_at: null } } },
       },
-      { id: '.claude-vazio', configDir: join(home, '.claude-vazio'), short: 'A', name: 'Conta A', color: '#5cc97b' },
+      { id: '.claude-vazio', configDir: join(home, '.claude-vazio'), short: 'A', name: 'Claude A', color: '#5cc97b' },
     ]);
     expect(JSON.stringify(accs)).not.toContain('nao-pode-vazar');
   });
@@ -154,7 +154,7 @@ describe('detecção de contas', () => {
       ]),
     };
     const accs = detectAccounts([join(home, '.claude'), join(home, '.claude-conta2')], { home: '/nenhum', env });
-    expect(accs[0]).toMatchObject({ id: '.claude', configDir: '/Users/x/.claude', short: 'C', name: 'Conta C', email: 'host@x.com', plan: 'Max', color: '#000000' });
+    expect(accs[0]).toMatchObject({ id: '.claude', configDir: '/Users/x/.claude', short: 'C', name: 'Claude C', email: 'host@x.com', plan: 'Max', color: '#000000' });
     expect(accs[1]).toMatchObject({ id: '.claude-conta2', configDir: '/Users/x/.claude-conta2', short: 'D', name: 'Pessoal', cachedUsage: { fetchedAtMs: 5 } });
   });
 });

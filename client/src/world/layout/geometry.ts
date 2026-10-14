@@ -28,9 +28,9 @@ export function slotAt(col: number, side: Side): number {
   return (col - CORE_COLS) * 2 + (side === 'north' ? 0 : 1);
 }
 
-/** Total de colunas do prédio para um conjunto de slots em uso (mínimo: 1 coluna de projeto). */
+/** Total de colunas do prédio: áreas comuns e somente colunas de projeto em uso. */
 export function columnsFor(slots: Iterable<number>): number {
-  let maxCol = 0;
+  let maxCol = -1;
   for (const s of slots) maxCol = Math.max(maxCol, Math.floor(Math.max(0, s) / 2));
   return CORE_COLS + maxCol + 1;
 }

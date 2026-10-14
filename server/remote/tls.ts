@@ -210,8 +210,8 @@ export function ensureCa(paths: TlsPaths, label: string, run: Run = spawnSync, d
         'prompt = no',
         'x509_extensions = v3_ca',
         '[dn]',
-        `CN = Habblaud local CA (${label.replace(/[^A-Za-z0-9 .-]/g, '')})`,
-        'O = Habblaud',
+        `CN = Dissero local CA (${label.replace(/[^A-Za-z0-9 .-]/g, '')})`,
+        'O = Dissero',
         '[v3_ca]',
         'basicConstraints = critical,CA:TRUE,pathlen:0',
         'keyUsage = critical,keyCertSign,cRLSign',
@@ -257,7 +257,7 @@ export function issueServerCert(paths: TlsPaths, targets: CertTargets, run: Run 
         '',
       ].join('\n'),
     );
-    openssl(run, ['req', '-new', '-newkey', 'rsa:2048', '-nodes', '-sha256', '-keyout', key, '-out', csr, '-subj', `/CN=${cn}/O=Habblaud`]);
+    openssl(run, ['req', '-new', '-newkey', 'rsa:2048', '-nodes', '-sha256', '-keyout', key, '-out', csr, '-subj', `/CN=${cn}/O=Dissero`]);
     openssl(run, [
       'x509', '-req', '-in', csr, '-CA', paths.caCert, '-CAkey', paths.caKey, '-sha256', '-days', String(SERVER_DAYS),
       '-set_serial', `0x${randomBytes(16).toString('hex')}`, '-extfile', ext, '-out', crt,

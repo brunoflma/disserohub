@@ -9,6 +9,7 @@ import { active, KINDS } from './gathering';
 import { CALLED } from './lines';
 import { SHELL_SOCIAL_MIN_MS } from './social';
 import { START_COINS, TASK_REWARD, TURN_REWARD } from './wallet';
+import { LEGAL_SOCIAL } from '../../local/legal-social';
 
 const theme: RoomTheme = {
   carpet: '#4f6d8f',
@@ -93,6 +94,79 @@ function newSim(): Sim {
 const ROOMS = [room('/a', 0), room('/b', 1)];
 
 describe('vida social', () => {
+  it.each(['auto', 'none', 'christmas', 'halloween'] as const)('tema %s: visita áreas comuns, lê e debate sem jogos ou apostas', (theme) => {
+    const sim = new Sim(art, () => ({ ...DEFAULT_WORLD_OPTIONS, theme, legalOffice: true, liveliness: 'lively' }), null);
+    const clock = { now: T0 };
+    sim.applySnapshot(snap(ROOMS, [agent('ana', '/a', 'idle'), agent('caio', '/b', 'idle'), agent('dora', '/a', 'idle'), agent('eric', '/b', 'idle')]), clock.now);
+    const visited = new Set<string>();
+    let reading = false;
+    let debating = false;
+    for (let i = 0; i < 900; i++) {
+      run(sim, clock, 1);
+      for (const c of sim.chars.values()) {
+        const spot = sim.spots.get(c.atSpot);
+        if (spot) visited.add(spot.areaId);
+        const area = sim.building.core.find((a) => c.tx >= a.rect.x && c.tx < a.rect.x + a.rect.w && c.ty >= a.rect.y && c.ty < a.rect.y + a.rect.h);
+        // Machine use and toilet visits do not occupy a seated atSpot.
+        if (area && (c.inside || ['use', 'drink', 'read', 'groom', 'sit', 'talk'].includes(c.pose))) visited.add(area.id);
+        if (area?.id === 'core:recepcao') expect(c.pose).not.toBe('sleep');
+        if (spot?.areaId === 'core:lounge' && c.pose === 'read' && c.held === 'book') reading = true;
+      }
+      for (const g of sim.social.gatherings) {
+        expect(['talk', 'kitchen', 'mirror']).toContain(g.kind);
+        expect(g.bet).toBe(0);
+        if (g.kind === 'talk' && g.phase === 'run') debating = true;
+      }
+    }
+    expect([...visited], `visited: ${[...visited].join(', ')}`).toEqual(expect.arrayContaining(['core:lounge', 'core:copa', 'core:recepcao', 'core:banheiros']));
+    expect(reading).toBe(true);
+    expect(debating).toBe(true);
+  });
+  it('quatro agentes debatem à mesa da Sala de Convivência e retornam ao trabalho quando chamados', () => {
+    const sim = new Sim(art, () => ({ ...DEFAULT_WORLD_OPTIONS, legalOffice: true, liveliness: 'lively' }), null);
+    const clock = { now: T0 };
+    const people = [agent('ana', '/a', 'idle'), agent('caio', '/b', 'idle'), agent('dora', '/a', 'idle'), agent('eric', '/b', 'idle')];
+    sim.applySnapshot(snap(ROOMS, people), clock.now);
+    run(sim, clock, .3);
+    expect(sim.social.force('talk', clock.now, people.map((p) => p.id))).not.toBeNull();
+    const g = [...sim.social.gatherings][0];
+    run(sim, clock, 90, () => g.phase === 'run');
+    expect(g.phase).toBe('run');
+    expect(active(g)).toHaveLength(4);
+    for (const m of active(g)) {
+      const seat = sim.spots.get(m.spot);
+      expect(seat?.areaId).toBe('core:lounge');
+      expect(seat?.seated).toBe(true);
+      expect(m.held).toBe('papers');
+    }
+    expect(sim.social.doing('ana')).toContain('Debatendo teses');
+    const dialogue = new Set<string>();
+    for (let i = 0; i < 12; i++) {
+      run(sim, clock, 1);
+      for (const c of sim.chars.values()) if (c.sayText) dialogue.add(c.sayText);
+    }
+    expect(LEGAL_SOCIAL.discuss.some((line) => dialogue.has(line))).toBe(true);
+    sim.applySnapshot(snap(ROOMS, people.map((p) => p.id === 'ana' ? { ...p, status: 'working' as const } : p), 2), clock.now);
+    const ana = sim.chars.get('ana')!;
+    run(sim, clock, 90, () => !ana.gathering && ana.atSpot === ana.homeSpot);
+    expect(ana.gathering).toBeNull();
+    expect(ana.atSpot).toBe(ana.homeSpot);
+    expect(ana.mode).toBe('work');
+  });
+  it('a espera de comandos conserva o estado shell e mostra documentos nos quatro temas', () => {
+    for (const theme of ['auto', 'none', 'christmas', 'halloween'] as const) {
+      const sim = new Sim(art, () => ({ ...DEFAULT_WORLD_OPTIONS, theme, legalOffice: true, liveliness: 'calm' }), null);
+      const clock = { now: T0 };
+      sim.applySnapshot(snap(ROOMS, [agent('ana', '/a', 'shell', { shells: [{ id: 'test-shell', label: 'Verificação', startedAt: T0, background: true, kind: 'shell' }] })]), clock.now);
+      run(sim, clock, 60);
+      const ana = sim.chars.get('ana')!;
+      expect(ana.mode).toBe('shell');
+      expect(ana.info.status).toBe('shell');
+      expect(ana.atSpot).toBe(ana.homeSpot);
+      expect(ana.pose).toBe('read');
+      expect(ana.held).toBe('papers');
+    }
+  });
   it('dois ociosos se juntam numa roda sozinhos, sem ninguém forçar', () => {
     const sim = newSim();
     const clock = { now: T0 };
@@ -158,7 +232,7 @@ describe('vida social', () => {
     if (a.wins + a.losses > 0) {
       expect(w.coins('ana')).not.toBe(START_COINS.main);
       expect(sim.social.events.at(-1)?.text).toMatch(/jokenpô/);
-      expect(['Recepção', 'Copa', 'Lounge']).toContain(sim.social.events.at(-1)?.place);
+      expect(['Recepção', 'Copa', 'Sala de Convivência', 'Corredor']).toContain(sim.social.events.at(-1)?.place);
     }
     // a roda acabou: nenhum lugar fica preso a ela
     for (const s of sim.spots.all()) expect(sim.spots.ownerOf(s.id)?.startsWith('g:') ?? false).toBe(false);
@@ -169,6 +243,10 @@ describe('vida social', () => {
     const clock = { now: T0 };
     sim.applySnapshot(snap(ROOMS, [agent('ana', '/a', 'idle'), agent('caio', '/b', 'idle')]), clock.now);
     run(sim, clock, 0.3);
+    // The legal office has no game area; retain an explicit fixture for the legacy game engine.
+    const court = sim.spots.ofKind('talk').filter((s) => s.areaId === 'core:lounge').map((s) => ({ ...s, id: `${s.id}:legacy-pingpong`, kind: 'pingpong' as const, group: 'pingpong' }));
+    expect(court).toHaveLength(2);
+    sim.spots.setSpots([...sim.spots.all(), ...court]);
     sim.social.force('pingpong', clock.now, ['ana', 'caio']);
     const g = [...sim.social.gatherings][0];
     run(sim, clock, 180, () => g.phase === 'ended');
@@ -219,7 +297,9 @@ describe('vida social', () => {
     expect(sim.social.gatherings.size).toBe(0);
     for (const c of sim.chars.values()) {
       expect(c.gathering).toBeNull();
-      expect(c.atSpot).toBe(c.homeSpot);
+      expect(c.atSpot).not.toBe(c.homeSpot);
+      expect(['armchair', 'sofa', 'beanbag', 'nook']).toContain(sim.spots.get(c.atSpot)?.kind);
+      expect(sim.spots.ownerOf(c.atSpot!)).toBe(c.id);
     }
     for (const s of sim.spots.all()) expect(sim.spots.ownerOf(s.id)?.startsWith('g:') ?? false).toBe(false);
   });

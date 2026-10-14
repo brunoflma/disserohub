@@ -1,5 +1,6 @@
 // Barra lateral: busca, filtro por conta e a lista de salas -> agentes -> subagentes.
 import type { AccountInfo, AgentInfo } from '../../../shared/types';
+import { access } from '../net/access';
 import { roomTheme } from '../art';
 import type { UiComponent, UiContext } from './context';
 import { moveAgent, orderAgents } from './agentorder';
@@ -7,7 +8,7 @@ import { moveRoom, orderRooms } from './roomorder';
 import { h, iconButton, KeyedList, setAttr, setHidden, setStyleVar, setText, setTitle } from './dom';
 import { plural, shortPath } from './format';
 import { ICONS } from './icons';
-import { groupRooms, type AgentNode, type RoomGroup } from './model';
+import { groupRooms, visibleShells, type AgentNode, type RoomGroup } from './model';
 import { officeIsEmpty } from './overlays';
 import { createAgentRow, updateAgentRow } from './rows';
 import { createAccountChip, createProgress, updateAccountChip, updateProgress } from './widgets';
@@ -39,7 +40,11 @@ interface NodeRefs {
 export class Sidebar implements UiComponent {
   readonly el: HTMLElement;
   private input: HTMLInputElement;
+  private addProject: HTMLButtonElement;
   private query = '';
+  private sessionFilter: 'active' | 'all' = 'all';
+  private activeBtn: HTMLButtonElement;
+  private allBtn: HTMLButtonElement;
   private filters: HTMLElement;
   private filterList: KeyedList<AccountInfo, HTMLButtonElement>;
   private scroller: HTMLElement;
@@ -61,7 +66,7 @@ export class Sidebar implements UiComponent {
     this.input = h('input', {
       class: 'ui-search__input',
       type: 'search',
-      attrs: { placeholder: tr('Buscar agente, projeto ou conta'), 'aria-label': tr('Buscar agente, projeto ou conta'), autocomplete: 'off', spellcheck: 'false' },
+      attrs: { placeholder: tr('Buscar projeto ou agente'), 'aria-label': tr('Buscar agente, projeto ou conta'), autocomplete: 'off', spellcheck: 'false' },
     });
     this.input.addEventListener('input', () => {
       this.query = this.input.value;
@@ -82,6 +87,13 @@ export class Sidebar implements UiComponent {
     const searchIcon = h('span', { class: 'ui-search__icon', attrs: { 'aria-hidden': 'true' } });
     searchIcon.innerHTML = ICONS.search;
     const search = h('label', { class: 'ui-search' }, searchIcon, this.input, h('kbd', { class: 'ui-kbd', text: '/', title: tr('Atalho: /') }));
+    this.addProject = iconButton(ICONS.folderPlus, tr('Adicionar projeto'), () => ctx.openProject?.(this.addProject));
+    this.addProject.setAttribute('aria-haspopup', 'dialog');
+    const searchRow = h('div', { class: 'ui-search-row' }, search, this.addProject);
+
+    this.activeBtn = h('button', { class: 'ui-session-filter', type: 'button', text: tr('Em andamento'), title: tr('Sessões trabalhando, aguardando você ou com comandos em execução'), on: { click: () => this.setSessionFilter('active') } });
+    this.allBtn = h('button', { class: 'ui-session-filter', type: 'button', text: tr('Recentes'), title: tr('Sessões em andamento e agentes descansando por 15 minutos após a pausa'), on: { click: () => this.setSessionFilter('all') } });
+    const sessions = h('div', { class: 'ui-session-filters', role: 'group', attrs: { 'aria-label': tr('Filtrar sessões por estado') } }, this.allBtn, this.activeBtn);
 
     this.filters = h('div', { class: 'ui-acc-filters', role: 'group', attrs: { 'aria-label': tr('Filtrar por conta') } });
     this.filterList = new KeyedList<AccountInfo, HTMLButtonElement>(this.filters, {
@@ -132,7 +144,7 @@ export class Sidebar implements UiComponent {
     this.el = h(
       'aside',
       { class: 'ui-panel ui-sidebar', attrs: { 'aria-label': tr('Salas e agentes'), id: 'ui-sidebar' } },
-      h('div', { class: 'ui-side__head' }, h('div', { class: 'ui-side__title' }, h('h2', { text: tr('Escritório') }), close), search, this.filters),
+      h('div', { class: 'ui-side__head' }, h('div', { class: 'ui-side__title' }, h('h2', { text: tr('Escritório') }), close), searchRow, sessions, this.filters),
       this.scroller,
     );
   }
@@ -142,7 +154,15 @@ export class Sidebar implements UiComponent {
     this.input.select();
   }
 
+  showProjects(): void {
+    this.query = '';
+    this.input.value = '';
+    this.sessionFilter = 'all';
+    this.ctx.invalidate();
+  }
+
   render(): void {
+    setHidden(this.addProject, !access().projects || this.ctx.store.mock || this.ctx.store.replaying);
     const snap = this.ctx.store.snapshot;
     const accounts = snap?.accounts ?? [];
     const hidden = new Set(this.ctx.prefs.hiddenAccounts);
@@ -150,23 +170,30 @@ export class Sidebar implements UiComponent {
     setHidden(this.filters, accounts.length <= 1);
 
     // Ordem das salas escolhida pelo usuário (arrastando o cabeçalho da sala).
-    const groups = orderRooms(groupRooms(snap, { query: this.query, hiddenAccounts: hidden }), (g) => g.room.id);
+    const filter = { query: this.query, hiddenAccounts: hidden };
+    const activeGroups = groupRooms(snap, { ...filter, sessions: 'active' });
+    const allGroups = groupRooms(snap, { ...filter, sessions: 'all' });
+    setText(this.activeBtn, `Em andamento · ${activeGroups.reduce((n, g) => n + g.nodes.length, 0)}`);
+    setText(this.allBtn, `Recentes · ${allGroups.reduce((n, g) => n + g.nodes.length, 0)}`);
+    setAttr(this.activeBtn, 'aria-pressed', String(this.sessionFilter === 'active'));
+    setAttr(this.allBtn, 'aria-pressed', String(this.sessionFilter === 'all'));
+    const groups = orderRooms(this.sessionFilter === 'active' ? activeGroups : allGroups, (g) => g.room.id);
     this.shownRooms = groups.map((g) => g.room.id);
     this.rooms.sync(groups);
 
     const filtering = this.query.trim().length > 0 || hidden.size > 0;
     const total = snap?.agents.length ?? 0;
     // Escritório vazio sem filtro: o cartão central já explica; a lista não repete o aviso.
-    const showEmpty = groups.length === 0 && (filtering || !officeIsEmpty(this.ctx));
+    const showEmpty = groups.length === 0 && (filtering || this.sessionFilter === 'active' || !officeIsEmpty(this.ctx));
     setHidden(this.empty, !showEmpty);
     if (showEmpty) {
       setText(
         this.emptyText,
         filtering && total > 0
           ? this.query.trim()
-            ? tr('Nenhum agente encontrado para “{0}”.', [this.query.trim()])
-            : tr('Nenhum agente nas contas selecionadas.')
-          : tr('Nenhuma sessão aberta no momento.'),
+            ? tr('Nenhuma sessão{0} encontrada para “{1}”.', [this.sessionFilter === 'active' ? tr(' em andamento') : '', this.query.trim()])
+            : tr('Nenhuma sessão{0} nas contas selecionadas.', [this.sessionFilter === 'active' ? tr(' em andamento') : ''])
+          : this.sessionFilter === 'active' ? tr('Nenhuma sessão em andamento no momento.') : tr('Nenhuma sessão aberta no momento.'),
       );
       setHidden(this.clearBtn, !(filtering && total > 0));
     }
@@ -191,6 +218,11 @@ export class Sidebar implements UiComponent {
     if (set.has(id)) set.delete(id);
     else set.add(id);
     this.ctx.updatePrefs({ hiddenAccounts: [...set] });
+  }
+
+  private setSessionFilter(filter: 'active' | 'all'): void {
+    this.sessionFilter = filter;
+    this.ctx.invalidate();
   }
 
   // ---------------------------------------------------------------- salas
@@ -247,7 +279,7 @@ export class Sidebar implements UiComponent {
     const r = this.roomRefs.get(section)!;
     const sel = this.ctx.selection();
     setText(r.name, g.room.name);
-    const present = g.agents.filter((a) => a.status !== 'offline').length;
+    const present = g.nodes.reduce((n, node) => n + 1 + node.subs.length, 0);
     setText(r.count, String(present));
     setTitle(r.count, plural(present, tr('agente'), tr('agentes')));
     setText(r.path, shortPath(g.room.path));
@@ -360,8 +392,9 @@ export class Sidebar implements UiComponent {
 
   private createNode(n: AgentNode): HTMLElement {
     const row = createAgentRow(n.agent, (id) => this.pick(id));
-    const subsCaption = h('span', { class: 'ui-subs__caption' });
+    const subsCaption = h('div', { class: 'ui-subs__caption' });
     const subsList = h('ul', { class: 'ui-subs__list' });
+    subsList.id = `ui-team-${n.agent.id}`;
     const subsWrap = h('div', { class: 'ui-subs', hidden: true }, subsCaption, subsList);
     // Botão irmão da linha (não dentro dela: botão dentro de botão não vale), sobre o status à direita: aparece com
     // o mouse em cima (ou foco) e fica aceso enquanto o terminal do agente estiver aberto.
@@ -402,11 +435,16 @@ export class Sidebar implements UiComponent {
       setTitle(r.term, open ? tr('Fechar o terminal') : tr('Abrir o terminal de {0} ({1})', [a.name, what]));
       setAttr(r.term, 'aria-label', open ? tr('Fechar o terminal de {0}', [a.name]) : tr('Abrir o terminal de {0}', [a.name]));
     }
-    const has = n.subTotal > 0;
+    const has = n.subs.length > 0;
     setHidden(r.subsWrap, !has);
     if (has) {
       const shown = n.subs.length;
-      setText(r.subsCaption, shown === n.subTotal ? plural(n.subTotal, tr('subagente'), tr('subagentes')) : `${shown} de ${plural(n.subTotal, tr('subagente'), tr('subagentes'))}`);
+      const count = shown === n.subTotal ? plural(n.subTotal, tr('subagente'), tr('subagentes')) : `${shown} de ${plural(n.subTotal, tr('subagente'), tr('subagentes'))}`;
+      const commands = n.subs.filter((sub) => visibleShells(sub, this.ctx.now()).length > 0).length;
+      const working = n.subs.filter((sub) => sub.status === 'working' && !visibleShells(sub, this.ctx.now()).length).length;
+      const waiting = n.subs.filter((sub) => sub.status === 'waiting' || !!sub.permission || !!sub.pendingQuestions?.length).length;
+      const summary = [count, working ? `${working} trabalhando` : '', commands ? `${commands} em comando` : '', waiting ? `${waiting} precisa${waiting > 1 ? 'm' : ''} de você` : ''].filter(Boolean).join(' · ');
+      setText(r.subsCaption, summary);
     }
     r.subs.sync(n.subs);
   }

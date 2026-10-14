@@ -345,7 +345,8 @@ export class Lighting {
       if (scene.roomInSlot(sh.slot)) continue;
       const r = sh.rect;
       m.fillStyle = corridorLit;
-      if (r.y === 0) m.fillRect(r.x * TILE, (r.y + r.h - 2) * TILE, r.w * TILE, 2 * TILE);
+      if (sh.interior) m.fillRect(r.x * TILE, r.y * TILE, r.w * TILE, r.h * TILE);
+      else if (r.y === 0) m.fillRect(r.x * TILE, (r.y + r.h - 2) * TILE, r.w * TILE, 2 * TILE);
       else m.fillRect(r.x * TILE, r.y * TILE, r.w * TILE, TILE);
     }
     const lit = new Map<AreaVis, number>();

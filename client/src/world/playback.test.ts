@@ -47,6 +47,14 @@ describe('descarte do mundo', () => {
     vi.stubGlobal('window', new EventTarget());
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.stubGlobal('Image', class {
+      src = '';
+      decoding = 'sync';
+      complete = true;
+      naturalWidth = 128;
+      naturalHeight = 128;
+      constructor(public width = 128, public height = 128) {}
+    });
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 404 })));
     const canvas = Object.assign(new EventTarget(), {
       clientWidth: 800,

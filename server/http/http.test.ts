@@ -29,7 +29,7 @@ async function start(extra: Partial<ApiDeps> = {}, officeExtra: Partial<OfficeDe
   const dist = join(tmp.dir, 'dist');
   mkdirSync(join(dist, 'assets', 'brand'), { recursive: true });
   mkdirSync(join(dist, 'bundle'), { recursive: true });
-  writeFileSync(join(dist, 'index.html'), '<!doctype html><title>Habblaud</title>');
+  writeFileSync(join(dist, 'index.html'), '<!doctype html><title>Dissero</title>');
   writeFileSync(join(dist, 'bundle', 'main-abc12345.js'), 'console.log(1)');
   writeFileSync(join(dist, 'assets', 'brand', 'logo-mark.png'), 'png');
   writeFileSync(join(dist, 'assets', 'manifest.json'), '{}');
@@ -126,7 +126,7 @@ describe('API HTTP', () => {
     await readUntil(/event: feed\n/);
     expect(text).toMatch(/^retry: 2000\n\nevent: snapshot\ndata: \{/);
     env.office.addActivity('.claude:1', { id: 'act-x', at: Date.now(), kind: 'read', icon: '📖', text: 'Lendo a.ts' }, true);
-    await readUntil(/"id":"act-x"/);
+    await readUntil(/event: feed\ndata: \[\{"id":"act-x"/);
     expect(text).toContain('event: feed\ndata: [{"id":"act-x"');
     ctrl.abort();
   });
@@ -239,7 +239,7 @@ describe('API HTTP', () => {
   it('estáticos: SPA fallback, immutable só no /bundle (hash) e revalidação no resto', async () => {
     const page = await fetch(`${env.base}/sala/qualquer`);
     expect(page.status).toBe(200);
-    expect(await page.text()).toContain('<title>Habblaud</title>');
+    expect(await page.text()).toContain('<title>Dissero</title>');
     expect(page.headers.get('cache-control')).toBe(REVALIDATE);
     expect(page.headers.get('x-frame-options')).toBe('DENY');
     const bundle = await fetch(`${env.base}/bundle/main-abc12345.js`);
@@ -264,7 +264,7 @@ describe('API HTTP', () => {
     expect((await fetch(`${env.base}/bundle/nao-existe.js`)).status).toBe(404);
     // Tentativa de sair da pasta cai no index.html, nunca em arquivos de fora.
     const escape = await fetch(`${env.base}/..%2F..%2Fetc%2Fpasswd`);
-    expect(await escape.text()).toContain('<title>Habblaud</title>');
+    expect(await escape.text()).toContain('<title>Dissero</title>');
   });
 });
 

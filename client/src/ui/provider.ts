@@ -1,14 +1,14 @@
 // De qual ferramenta é cada coisa (Claude Code ou Codex) e os textos que mudam com ela. Puro (sem DOM): testado em
 // ui/provider.test.ts. No protocolo, `provider` ausente quer dizer Claude Code (shared/types.ts); aqui tudo cai nisso.
 //
-// Identidade visual do Codex (sem logotipo de ninguém): o chip da conta fica "vazado" (fundo escuro, borda e letra na
-// cor da conta, cantos em degrau) e, onde há espaço, um selo de texto "Codex" ao lado do nome.
+// Identidade visual: os chips usam o mascote do Claude Code e a marca do ChatGPT/Codex, com a cor da conta na borda.
+// Onde há espaço, o selo de texto "ChatGPT" aparece ao lado do nome.
 import type { AccountInfo, OfficeSnapshot, Provider } from '../../../shared/types';
 import { shortcutHint } from './model';
 import { tr } from '../../../shared/i18n';
 
 /** Nome de cada ferramenta como aparece nos textos. */
-export const PROVIDER_NAME: Record<Provider, string> = { claude: 'Claude Code', codex: 'Codex' };
+export const PROVIDER_NAME: Record<Provider, string> = { claude: 'Claude', codex: 'ChatGPT' };
 
 /** Ferramenta de um agente, conta, sessão ou pedido (ausente = Claude Code). */
 export function providerOf(x: { provider?: Provider } | null | undefined): Provider {
@@ -48,16 +48,16 @@ export function fallbackShort(id: string, provider: Provider = accountProvider(u
   return provider === 'codex' ? 'X' : '?';
 }
 
-/** O selo "Codex" ao lado do nome da conta (não repete quando o nome já diz "Codex"). */
+/** O selo "ChatGPT" ao lado do nome da conta, sem repetir a marca já presente no nome. */
 export function showsProviderTag(provider: Provider, accountName = ''): boolean {
-  return provider === 'codex' && !/codex/i.test(accountName);
+  return provider === 'codex' && !/codex|chatgpt/i.test(accountName);
 }
 
-/** Rótulo do chip da conta (dica e leitores de tela): "Conta C (dev@x.com)", "Codex · plano Team". */
+/** Rótulo do chip da conta (dica e leitores de tela): "Claude (dev@x.com)", "ChatGPT · plano Team". */
 export function accountChipLabel(account: Pick<AccountInfo, 'name' | 'email' | 'plan' | 'provider'> | undefined, fallbackId: string, provider: Provider): string {
-  if (!account) return fallbackId ? `${fallbackId}${provider === 'codex' ? ' · Codex' : ''}` : tr('Conta desconhecida');
+  if (!account) return fallbackId ? `${fallbackId}${provider === 'codex' ? ' · ChatGPT' : ''}` : tr('Conta desconhecida');
   if (provider !== 'codex') return `${account.name}${account.email ? ` (${account.email})` : ''}`;
-  const tag = showsProviderTag(provider, account.name) ? ' · Codex' : '';
+  const tag = showsProviderTag(provider, account.name) ? ' · ChatGPT' : '';
   return `${account.name}${tag}${account.plan ? tr(' · plano {0}', [account.plan]) : ''}`;
 }
 

@@ -9,8 +9,24 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { DISSERO_REPOSITORY } from '../shared/distribution';
+import { parseGithubRepo } from '../server/updates/checker';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+/** A fork's gh default can point upstream; all writes must use the distribution repository explicitly. */
+export function assertReleaseTarget(repository: unknown, origin: string): void {
+  if (parseGithubRepo(repository) !== DISSERO_REPOSITORY || parseGithubRepo(origin) !== DISSERO_REPOSITORY) {
+    throw new Error(`A publicação exige package.json e origin apontando para ${DISSERO_REPOSITORY}.`);
+  }
+}
+
+export function assertSuccessfulCi(runs: { id: number; name: string; head_sha: string; status: string; conclusion: string | null }[], sha: string): void {
+  const latest = runs.filter((run) => run.name === 'CI' && run.head_sha === sha).sort((a, b) => b.id - a.id)[0];
+  if (!latest || latest.status !== 'completed' || latest.conclusion !== 'success') {
+    throw new Error('A publicação exige CI concluída com sucesso no commit exato da main.');
+  }
+}
 
 export interface ReleaseArgs {
   dryRun: boolean;
@@ -91,7 +107,9 @@ function main(argv: string[]): void {
     return;
   }
 
-  const version = (JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string }).version;
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string; repository?: unknown };
+  assertReleaseTarget(pkg.repository, run('git', ['remote', 'get-url', 'origin']));
+  const version = pkg.version;
   const tag = `v${version}`;
   const section = changelogSection(readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8'), version);
   if (!section) fail(`o CHANGELOG.md não tem a seção "## [${version}]" (ou ela está vazia): escreva o que entrou nesta versão.`);
@@ -110,19 +128,23 @@ function main(argv: string[]): void {
   if (tagExists) fail(`a tag ${tag} já existe: suba a versão no package.json antes.`);
   const notes = unwrapMarkdown(section);
 
-  console.log(`Habblaud ${tag}\n\n${notes}\n`);
+  console.log(`Dissero ${tag}\n\n${notes}\n`);
   if (args.dryRun) {
     console.log('(--dry-run: nada foi publicado)');
     return;
   }
 
+  const sha = run('git', ['rev-parse', 'HEAD']);
+  const ci = JSON.parse(run('gh', ['api', `repos/${DISSERO_REPOSITORY}/actions/runs?head_sha=${sha}&event=push&branch=main`])) as { workflow_runs: Parameters<typeof assertSuccessfulCi>[0] };
+  assertSuccessfulCi(ci.workflow_runs, sha);
+
   const dir = mkdtempSync(join(tmpdir(), 'habblaud-release-'));
   try {
     const file = join(dir, 'notas.md');
     writeFileSync(file, `${notes}\n`);
-    run('git', ['tag', '-a', tag, '-m', `Habblaud ${tag}`]);
+    run('git', ['tag', '-a', tag, '-m', `Dissero ${tag}`]);
     run('git', ['push', 'origin', tag]);
-    const url = run('gh', ['release', 'create', tag, '--verify-tag', '--title', `Habblaud ${tag}`, '--notes-file', file]);
+    const url = run('gh', ['release', 'create', tag, '--repo', DISSERO_REPOSITORY, '--verify-tag', '--title', `Dissero ${tag}`, '--notes-file', file]);
     console.log(`✓ Release publicada: ${url}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });

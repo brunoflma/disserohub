@@ -5,6 +5,7 @@ import { assembleBuilding, coreAreas } from './building';
 import { columnsFor, slotAt, slotColumn, slotRect, slotSide } from './geometry';
 import { layoutProjectRoom, roomVariant } from './room';
 import { layoutExterior, slotShell } from './exterior';
+import { interiorSlotShell } from './interior';
 import { RECEPTION_ID } from './core';
 import type { AreaLayout } from './types';
 
@@ -43,8 +44,8 @@ describe('mapeamento de slots', () => {
     expect(b.y + b.h).toBe(BUILDING_H);
   });
 
-  it('largura do prédio: núcleo + maior coluna usada + 1 (mínimo 1 coluna de projeto)', () => {
-    expect(columnsFor([])).toBe(3);
+  it('largura do prédio: só o núcleo quando não há projetos; demais colunas acompanham os slots', () => {
+    expect(columnsFor([])).toBe(2);
     expect(columnsFor([0, 1])).toBe(3);
     expect(columnsFor([5])).toBe(5);
     expect(columnsFor([2, 11])).toBe(8);
@@ -222,6 +223,29 @@ describe('variações das salas de projeto', () => {
     const room = layoutProjectRoom({ id: '/v/x', slot: 0, seed: 42 }, theme);
     expect(room.floors.every((f) => f.kind !== 'tile_white')).toBe(true);
     expect(room.floorTint).toBe(theme.carpet);
+  });
+});
+
+describe('escritórios reservados', () => {
+  it('mantém o vão do corredor aberto nos dois lados, sem uma parede herdada fechando a entrada', () => {
+    for (let slot = 0; slot < 10; slot++) {
+      const sh = interiorSlotShell(slot, true);
+      const kind = slotSide(slot) === 'north' ? 'south' : 'face';
+      const y = sh.door.y * TILE;
+      const entrance = sh.walls.filter((w) => w.kind === kind && w.y === y);
+      expect(entrance).toHaveLength(1);
+      expect('doorways' in entrance[0] ? entrance[0].doorways : []).toContainEqual({ x: sh.door.x * TILE, w: sh.door.w * TILE });
+      expect(sh.props).toEqual([]);
+    }
+  });
+  it('usa seis estações de trabalho e decoração de escritório em vez de um segundo lounge', () => {
+    for (let slot = 0; slot < 10; slot++) {
+      const sh = interiorSlotShell(slot, false);
+      expect(sh.furniture.filter((f) => f.kind === 'desk' || f.kind === 'desk_back')).toHaveLength(6);
+      expect(sh.wallItems.some((w) => w.kind === 'whiteboard')).toBe(true);
+      expect(sh.furniture.some((f) => f.kind === 'bookshelf')).toBe(true);
+      for (let i = 1; i < sh.furniture.length; i++) expect(sh.furniture[i].y).toBeGreaterThanOrEqual(sh.furniture[i - 1].y);
+    }
   });
 });
 

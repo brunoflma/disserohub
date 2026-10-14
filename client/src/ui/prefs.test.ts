@@ -54,7 +54,7 @@ describe('preferências', () => {
     expect(() => savePrefs(broken, DEFAULT_PREFS)).not.toThrow();
   });
   it('extrai só as opções do mundo', () => {
-    expect(worldOptionsFrom({ ...DEFAULT_PREFS, daylight: 'day' })).toEqual({ showNames: true, bubbles: 'important', liveliness: 'normal', dayNight: false, daylight: 'day', theme: 'auto' });
+    expect(worldOptionsFrom({ ...DEFAULT_PREFS, daylight: 'day' })).toEqual({ showNames: true, bubbles: 'important', liveliness: 'normal', dayNight: false, daylight: 'day', theme: 'auto', economy: false, legalOffice: true });
     expect(worldOptionsFrom({ ...DEFAULT_PREFS, daylight: 'night' })).toMatchObject({ dayNight: true, daylight: 'night' });
   });
   it('ciclo dia/noite: valida o modo e migra o interruptor antigo', () => {
@@ -65,9 +65,21 @@ describe('preferências', () => {
     expect(sanitizePrefs({ dayNight: true }).daylight).toBe('auto');
     expect(sanitizePrefs({ dayNight: false, daylight: 'night' }).daylight).toBe('night');
   });
+  it('keeps old preferences while adding the workspace defaults', () => {
+    expect(sanitizePrefs({ showNames: false, feedOpen: false, daylight: 'night' })).toMatchObject({ showNames: false, feedOpen: false, daylight: 'night', feedMode: 'important', sidebarWidth: 304, drawerWidth: 380, feedHeight: 200, economy: false, cameraView: null });
+  });
+  it('rejects corrupted camera positions and clamps panel sizes', () => {
+    const invalid = sanitizePrefs({ sidebarWidth: Infinity, drawerWidth: 1, feedHeight: 10000, cameraView: { x: 1, y: NaN, zoom: 2, cols: 4, width: 927, height: 956 } });
+    expect(invalid).toMatchObject({ sidebarWidth: 304, drawerWidth: 300, feedHeight: 360, cameraView: null });
+    const valid = { x: 100, y: 200, zoom: 1.5, cols: 4, width: 927, height: 956, mode: 'manual' as const };
+    expect(sanitizePrefs({ cameraView: valid }).cameraView).toEqual(valid);
+    expect(sanitizePrefs({ cameraView: { ...valid, zoom: 6 } }).cameraView?.zoom).toBe(6);
+    expect(sanitizePrefs({ cameraView: { ...valid, zoom: 7 } }).cameraView).toBeNull();
+  });
   it('temas: preserva preferências antigas e recupera valores inválidos', () => {
     expect(sanitizePrefs({ daylight: 'night' })).toMatchObject({ theme: 'auto', daylight: 'night' });
     expect(sanitizePrefs({ theme: 'invalid' }).theme).toBe('auto');
+    expect(sanitizePrefs({ theme: 'legal' }).theme).toBe('none');
     for (const theme of ['christmas', 'halloween', 'none', 'auto'] as const) {
       const st = memoryStorage();
       savePrefs(st, { ...DEFAULT_PREFS, theme });

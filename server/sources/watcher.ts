@@ -30,6 +30,7 @@ import {
   type SubagentMeta,
 } from './subagents';
 import { FileTail } from './tail';
+import { AsyncSubagentInventory } from './subagent-inventory';
 import {
   createTranscriptState,
   mergePrefix,
@@ -56,6 +57,8 @@ export interface WatcherOptions {
   isAlive?: (pid: number) => boolean;
   /** Desliga o fs.watch (testes). */
   watch?: boolean;
+  /** Keeps large subagent metadata scans off the HTTP event loop. */
+  asyncSubagents?: boolean;
 }
 
 /** cwd -> nome da pasta em projects/ (todo caractere não alfanumérico vira "-"). */
@@ -91,6 +94,7 @@ function applyShellSignal(shells: ShellTracker, owner: string, sig: TranscriptSi
 }
 
 interface SubTracker {
+  completedAt?: number;
   agentId: string;
   id: string;
   file: SubagentFile;
@@ -111,8 +115,8 @@ interface SessionTracker {
   state: TranscriptState;
   customTitleFile?: string;
   subs: Map<string, SubTracker>;
-  /** Arquivos de subagentes já vistos e fora do escritório: tamanho conhecido. */
-  known: Map<string, number>;
+  /** Arquivos já encerrados: posição lida e horário da conclusão, para reconhecer trabalho novo. */
+  known: Map<string, { size: number; completedAt: number }>;
   spawns: Map<string, SpawnInfo & { owner: string }>;
   launched: Map<string, { agentId?: string; runId?: string }>;
   taskToTool: Map<string, string>;
@@ -178,6 +182,7 @@ export class ClaudeWatcher implements AgentSource {
   private readonly tailBytes: number;
   private readonly useWatch: boolean;
   private stopped = false;
+  private subagentInventory?: AsyncSubagentInventory;
   /** Menor versão do Claude Code vista gravando "shell" no registro (começa na conhecida). */
   private shellStatusVersion = SHELL_STATUS_VERSION;
 
@@ -206,6 +211,7 @@ export class ClaudeWatcher implements AgentSource {
 
   stop(): void {
     this.stopped = true;
+    this.subagentInventory?.stop();
     if (this.timer) clearInterval(this.timer);
     if (this.kick) clearTimeout(this.kick);
     this.timer = null;
@@ -316,6 +322,7 @@ export class ClaudeWatcher implements AgentSource {
         role: entry.agent ? tr('Agente {0}', [entry.agent]) : tr('Agente principal'),
         startedAt: entry.startedAt ?? this.now(),
         status: st.status ?? 'idle',
+        statusSince: st.status === 'idle' ? (entry.statusUpdatedAt ?? entry.startedAt) : undefined,
         waitingFor: st.waitingFor,
       });
     } else if (t.sessionId !== entry.sessionId) {
@@ -664,7 +671,14 @@ export class ClaudeWatcher implements AgentSource {
     if (!boot && !busy && now - t.lastSubScanAt < 5_000) return;
     t.lastSubScanAt = now;
     this.watchSubagents(t);
-    const files = listSubagentFiles(sessionDirOf(t.transcriptPath));
+    const directory = sessionDirOf(t.transcriptPath);
+    if (this.opts.asyncSubagents && !this.subagentInventory) {
+      this.subagentInventory = new AsyncSubagentInventory(() => this.schedule(),
+        error => log.warnOnce(`subagent-inventory:${errMsg(error)}`, `Falha na leitura de subagentes: ${errMsg(error)}`), this.now);
+    }
+    const inventory = this.subagentInventory?.current(directory);
+    if (this.subagentInventory && !inventory) return;
+    const files = inventory?.files ?? listSubagentFiles(directory);
     const workflowAgents = files.filter((f) => f.runId).length;
     if (workflowAgents !== t.workflowAgents) {
       t.workflowAgents = workflowAgents;
@@ -678,7 +692,8 @@ export class ClaudeWatcher implements AgentSource {
       let size: number;
       let mtimeMs: number;
       try {
-        const st = statSync(file.path);
+        const st = inventory ? inventory.metadata.get(file.path) : statSync(file.path);
+        if (!st) continue;
         size = st.size;
         mtimeMs = st.mtimeMs;
       } catch {
@@ -687,11 +702,11 @@ export class ClaudeWatcher implements AgentSource {
       const known = t.known.get(file.path);
       if (known === undefined) {
         if (firstScan && now - mtimeMs > BOOT_RECENT_MS && !this.maybeStillRunning(t, file, now - mtimeMs)) {
-          t.known.set(file.path, size);
+          t.known.set(file.path, { size, completedAt: now });
           continue;
         }
         this.openSub(t, file, firstScan ? 'replay' : 'new');
-      } else if (size > known) {
+      } else if (size > known.size) {
         this.openSub(t, file, 'regrown');
       }
     }
@@ -723,9 +738,9 @@ export class ClaudeWatcher implements AgentSource {
     } catch (err) {
       // Arquivo problemático: ignora até ele mudar de tamanho de novo.
       try {
-        t.known.set(file.path, statSync(file.path).size);
+        t.known.set(file.path, { size: statSync(file.path).size, completedAt: t.known.get(file.path)?.completedAt ?? this.now() });
       } catch {
-        t.known.set(file.path, 0);
+        t.known.set(file.path, { size: 0, completedAt: t.known.get(file.path)?.completedAt ?? this.now() });
       }
       log.warnOnce(`sub-open:${file.path}`, tr('Subagente {0} ignorado: {1}', [file.agentId, errMsg(err)]));
     }
@@ -735,6 +750,28 @@ export class ClaudeWatcher implements AgentSource {
     const office = this.opts.office;
     const now = this.now();
     const meta = readSubagentMeta(file.metaPath);
+    if (mode === 'regrown') {
+      // Só os bytes novos podem justificar uma volta. Reaplicar o prompt antigo,
+      // texto final ou resultados atrasados fazia o subagente concluído reaparecer.
+      const appended = new FileTail(file.path);
+      const start = appended.seekTail(this.tailBytes);
+      const known = t.known.get(file.path);
+      appended.offset = Math.max(start, known?.size ?? start);
+      const delta = createTranscriptState();
+      let newWork = false;
+      for (let i = 0; i < 4; i++) {
+        const r = appended.read();
+        for (const line of r.lines) {
+          const res = parseLine(delta, line, { idPrefix: file.agentId, now });
+          newWork ||= res.activities.some((a) => a.current && a.activity.at >= (known?.completedAt ?? now) && (a.activity.kind === 'prompt' || !!a.toolUseId));
+        }
+        if (!r.more) break;
+      }
+      if (!newWork || delta.ended) {
+        t.known.set(file.path, { size: appended.offset, completedAt: known?.completedAt ?? now });
+        return;
+      }
+    }
     const tail = new FileTail(file.path);
     // Arquivo novo e pequeno: seekTail devolve 0 e lê tudo; grande: só o fim.
     const start = tail.seekTail(this.tailBytes);
@@ -750,7 +787,7 @@ export class ClaudeWatcher implements AgentSource {
       this.isFinished(t, file, meta) ||
       (mode !== 'new' && concludedByIdle({ now, lastWriteAt: tail.mtimeMs, ended: state.ended, pendingTool: state.pendingTools.size > 0 }));
     if (finished) {
-      t.known.set(file.path, tail.size);
+      t.known.set(file.path, { size: tail.size, completedAt: now });
       return;
     }
     const spawn = meta?.toolUseId ? t.spawns.get(meta.toolUseId) : undefined;
@@ -798,11 +835,13 @@ export class ClaudeWatcher implements AgentSource {
       if (!office.has(sub.id)) {
         // Já saiu do escritório (período de graça encerrado).
         t.subs.delete(sub.agentId);
-        t.known.set(sub.file.path, sub.tail.size);
+        t.known.set(sub.file.path, { size: sub.tail.size, completedAt: sub.completedAt ?? now });
         continue;
       }
       sub.meta ??= readSubagentMeta(sub.file.metaPath);
-      let fresh = 0;
+      let newWork = false;
+      const completedAt = office.isSubDone(sub.id) ? office.get(sub.id)?.statusSince ?? now : now;
+      if (office.isSubDone(sub.id)) sub.completedAt ??= completedAt;
       for (let i = 0; i < 4; i++) {
         let r;
         try {
@@ -813,16 +852,16 @@ export class ClaudeWatcher implements AgentSource {
         }
         for (const line of r.lines) {
           const res = parseWatchedLine(sub.state, line, { idPrefix: sub.id, now });
-          fresh += res.activities.length;
+          newWork ||= res.activities.some((a) => a.current && a.activity.at >= completedAt && (a.activity.kind === 'prompt' || !!a.toolUseId));
           this.applyResult(t, sub.id, res, true);
         }
         if (r.lines.length) this.applySubSummary(sub);
         if (!r.more) break;
       }
       if (office.isSubDone(sub.id)) {
-        if (fresh > 0 && !this.isFinished(t, sub.file, sub.meta)) {
-          const since = office.get(sub.id)?.statusSince ?? now;
-          if (now - since > 3_000) office.reactivateSub(sub.id);
+        if (newWork && !sub.state.ended && !this.isFinished(t, sub.file, sub.meta)) {
+          office.reactivateSub(sub.id);
+          delete sub.completedAt;
         }
         continue;
       }
@@ -831,6 +870,7 @@ export class ClaudeWatcher implements AgentSource {
         concludedByIdle({ now, lastWriteAt: sub.tail.mtimeMs, ended: sub.state.ended, pendingTool: sub.state.pendingTools.size > 0 });
       if (done) {
         office.completeSub(sub.id);
+        sub.completedAt = now;
         // Concluiu: nada dele roda em primeiro plano (o que estiver em segundo plano passa para o principal).
         t.shells.endForeground(sub.id, now);
       }
@@ -877,6 +917,7 @@ export class ClaudeWatcher implements AgentSource {
   }
 
   private closeWatchers(t: SessionTracker): void {
+    if (t.transcriptPath) this.subagentInventory?.forget(sessionDirOf(t.transcriptPath));
     for (const w of t.watchers) w.close();
     t.watchers = [];
     t.watchingSubs = false;

@@ -14,6 +14,7 @@ import { FREE } from '../path/grid';
 import { isLongIdle } from '../sim/behavior';
 import { facing, type Character } from '../sim/character';
 import type { Sim } from '../sim/sim';
+import { LEGAL_SOCIAL } from '../../local/legal-social';
 import type { Step } from '../sim/steps';
 import {
   active,
@@ -63,7 +64,7 @@ const COIN_COLOR = '#ffd34d';
 const LOSS_COLOR = '#ff8a8a';
 
 const KIND_LIST = Object.keys(KINDS) as GatherKind[];
-const PLACES: Readonly<Record<string, string>> = { [LOUNGE_ID]: tr('Lounge'), [CAFE_ID]: tr('Copa'), [RECEPTION_ID]: tr('Recepção'), [RESTROOM_ID]: tr('Banheiros') };
+const PLACES: Readonly<Record<string, string>> = { [LOUNGE_ID]: tr('Sala de Convivência'), [CAFE_ID]: tr('Copa'), [RECEPTION_ID]: tr('Recepção'), [RESTROOM_ID]: tr('Banheiros') };
 /** O que se perde/ganha em cada jogo (texto do extrato: "Perdeu no jokenpô para Rafaela"). */
 const MATCH_WHAT: Partial<Record<GatherKind, string>> = {
   rps: tr('no jokenpô'),
@@ -95,6 +96,7 @@ export class Social {
   constructor(
     private readonly sim: Sim,
     storage: StorageLike | null,
+    private readonly formal: () => boolean = () => false,
   ) {
     this.wallets = new Wallets(storage);
   }
@@ -102,14 +104,14 @@ export class Social {
   // =================================================================== disponibilidade
 
   /**
-   * Pode entrar numa roda agora: ocioso (ou esperando um shell há SHELL_SOCIAL_MIN_MS), sentado na
-   * própria mesa, sem nada planejado. Quem cochila de tão ocioso pode ser acordado por um convite.
+   * Pode entrar numa roda agora: ocioso (ou esperando um shell há SHELL_SOCIAL_MIN_MS), sentado em
+   * um assento de descanso (shell: na própria mesa), sem nada planejado. Pode acordar com um convite.
    */
   canJoin(c: Character, now: number): boolean {
     if (c.gone || c.leaving || c.arriving || c.inside || c.gathering) return false;
     if (c.mode !== 'idle' && c.mode !== 'shell') return false;
     if (c.step || c.queue.length) return false;
-    if (!c.homeSpot || c.atSpot !== c.homeSpot) return false;
+    if (!c.atSpot || (c.mode === 'idle' ? !c.seated : c.atSpot !== c.homeSpot)) return false;
     if (now < c.reactUntil) return false;
     if (c.mode === 'shell' && (!c.shellSince || now - c.shellSince < SHELL_SOCIAL_MIN_MS)) return false;
     return true;
@@ -127,6 +129,10 @@ export class Social {
     return [...this.gatherings].some((g) => this.openSpotFor(g, ch) !== undefined);
   }
 
+  private capacity(kind: GatherKind): number {
+    return this.formal() && kind === 'talk' ? 4 : KINDS[kind].max;
+  }
+
   // =================================================================== começar / entrar
 
   /**
@@ -141,6 +147,10 @@ export class Social {
     const cands = this.candidates(ch, now);
     const avail: Partial<Record<GatherKind, boolean>> = {};
     for (const k of KIND_LIST) {
+      if (this.formal() && !['talk', 'kitchen', 'mirror'].includes(k)) {
+        avail[k] = false;
+        continue;
+      }
       const need = k === 'mirror' ? (groupOnly ? 1 : 0) : KINDS[k].min - 1;
       if (cands.length < need) continue;
       if (k === 'mirror' && !groupOnly) {
@@ -166,14 +176,14 @@ export class Social {
     const pool = ids?.length ? ids.map((id) => this.sim.chars.get(id)).filter((c): c is Character => !!c) : [...this.sim.chars.values()];
     for (const c of pool) {
       if (c.gathering) this.sim.clearPlan(c);
-      // depuração: levanta quem estiver passeando e põe na mesa na hora
+      // depuração: interrompe os passeios para poder reunir quem já estiver sentado.
       if ((c.mode === 'idle' || c.mode === 'shell') && !c.leaving && (c.step || c.queue.length)) this.sim.clearPlan(c);
     }
-    const free = pool.filter((c) => !c.leaving && !c.gone && (c.mode === 'idle' || c.mode === 'shell') && c.homeSpot && c.atSpot === c.homeSpot && !c.step && !c.queue.length);
+    const free = pool.filter((c) => !c.leaving && !c.gone && (c.mode === 'idle' || c.mode === 'shell') && c.atSpot && (c.mode === 'idle' ? c.seated : c.atSpot === c.homeSpot) && !c.step && !c.queue.length);
     if (!free.length) return null;
     const [host, ...rest] = free;
-    const extra = kind === 'mirror' ? Math.min(1, rest.length) : Math.min(rest.length, KINDS[kind].max - 1);
-    const ok = this.start(kind, host, rest, now, false, Math.max(KINDS[kind].min - 1, Math.min(extra, kind === 'tv' || kind === 'kitchen' ? 3 : 1)), true);
+    const extra = kind === 'mirror' ? Math.min(1, rest.length) : Math.min(rest.length, this.capacity(kind) - 1);
+    const ok = this.start(kind, host, rest, now, false, Math.max(KINDS[kind].min - 1, Math.min(extra, kind === 'tv' || kind === 'kitchen' || (this.formal() && kind === 'talk') ? 3 : 1)), true);
     if (!ok) return null;
     const g = host.gathering;
     return g ? g.members.map((m) => this.sim.chars.get(m.id)?.info.name ?? m.id) : null;
@@ -186,12 +196,12 @@ export class Social {
     let want: number;
     if (wantOverride !== undefined) want = wantOverride;
     else if (kind === 'tv') want = 1 + Math.floor(rng() * 3);
-    else if (kind === 'kitchen') want = 1 + Math.floor(rng() * 2.4);
+    else if (kind === 'kitchen' || (this.formal() && kind === 'talk')) want = 1 + Math.floor(rng() * 2.4);
     else if (kind === 'mirror') want = groupOnly ? 1 : cands.some((c) => hasTrait(personaFor(c.info.seed), 'vaidade')) && rng() < 0.5 ? 1 : 0;
     else want = info.min - 1;
     // torcida já na largada, às vezes
     if (wantOverride === undefined && (kind === 'pingpong' || kind === 'videogame' || kind === 'rps') && rng() < 0.3) want++;
-    want = Math.max(0, Math.min(want, cands.length, info.max - 1));
+    want = Math.max(0, Math.min(want, cands.length, this.capacity(kind) - 1));
     const ranked = cands
       .map((c) => {
         const cp = personaFor(c.info.seed);
@@ -277,7 +287,10 @@ export class Social {
         text = L.pick(first && bondBetween(host.info.seed, first.info.seed) === 'rivalidade' ? L.INVITE.pingpongRival : L.INVITE.pingpong, rng, vars);
         break;
       case 'kitchen':
-        text = L.pick(hasTrait(hp, 'fofoca') ? L.INVITE.kitchenGossip : L.INVITE.kitchen, rng, vars);
+        text = L.pick(!this.formal() && hasTrait(hp, 'fofoca') ? L.INVITE.kitchenGossip : L.INVITE.kitchen, rng, vars);
+        break;
+      case 'talk':
+        text = L.pick(this.formal() ? LEGAL_SOCIAL.invite : L.INVITE.talk, rng, vars);
         break;
       case 'rps':
         text = L.pick(g.bet ? L.INVITE.rps : L.INVITE.rpsHonor, rng, vars);
@@ -292,7 +305,7 @@ export class Social {
     if (text) this.say(host, text, now);
     guests.forEach((c, i) => {
       const sleepy = isLongIdle(c.info.status, c.info.statusSince, now);
-      const p = sleepy ? L.ACCEPT_SLEEPY : c.mode === 'shell' && g.kind !== 'rps' ? L.ACCEPT_SHELL : pool;
+      const p = this.formal() ? LEGAL_SOCIAL.accept : sleepy ? L.ACCEPT_SLEEPY : c.mode === 'shell' && g.kind !== 'rps' ? L.ACCEPT_SHELL : pool;
       g.pending.push({ id: c.id, at: now + 900 + i * 650, text: L.pick(p, rng) });
     });
   }
@@ -338,8 +351,9 @@ export class Social {
     let bestScore = 0;
     for (const g of this.gatherings) {
       if (g.phase !== 'run' && g.phase !== 'gather') continue;
-      if (g.kind === 'talk' || g.kind === 'arcade' || g.kind === 'mirror') continue;
-      if (active(g).length >= KINDS[g.kind].max) continue;
+      if (this.formal() && !['talk', 'kitchen', 'mirror'].includes(g.kind)) continue;
+      if ((g.kind === 'talk' && !this.formal()) || g.kind === 'arcade' || g.kind === 'mirror') continue;
+      if (active(g).length >= this.capacity(g.kind)) continue;
       if (this.openSpotFor(g, ch) === undefined) continue;
       let s = KINDS[g.kind].match ? 0.8 : 1;
       s *= g.kind === 'tv' ? (hasTrait(p, 'series') ? 3 : 1.4) : g.kind === 'kitchen' ? (hasTrait(p, 'fofoca') || hasTrait(p, 'cafeina') ? 2.5 : 1) : hasTrait(p, 'competicao') || hasTrait(p, 'esporte') || hasTrait(p, 'games') ? 2 : 1;
@@ -360,8 +374,8 @@ export class Social {
   /** Lugar livre para mais um na roda: spot do pool (TV, torcida, copa) ou tile em pé (jokenpô). undefined = não cabe. */
   private openSpotFor(g: Gathering, ch: Character): SpotDef | null | undefined {
     if (g.phase === 'final' || g.phase === 'ended') return undefined;
-    if (g.kind === 'talk' || g.kind === 'arcade' || g.kind === 'mirror') return undefined;
-    if (active(g).length >= KINDS[g.kind].max) return undefined;
+    if ((g.kind === 'talk' && !this.formal()) || g.kind === 'arcade' || g.kind === 'mirror') return undefined;
+    if (active(g).length >= this.capacity(g.kind)) return undefined;
     const used = new Set(active(g).map((m) => m.spot));
     for (const id of g.pool) if (!used.has(id)) return this.sim.spots.get(id) ?? undefined;
     if (g.kind === 'rps') return this.standNear(g, ch) ? null : undefined;
@@ -371,7 +385,7 @@ export class Social {
   private join(g: Gathering, ch: Character, now: number): boolean {
     const spot = this.openSpotFor(g, ch);
     if (spot === undefined) return false;
-    const role: Role = g.kind === 'kitchen' ? 'talker' : KINDS[g.kind].match ? 'watcher' : 'player';
+    const role: Role = g.kind === 'kitchen' || g.kind === 'talk' ? 'talker' : KINDS[g.kind].match ? 'watcher' : 'player';
     const m = this.member(ch, role, spot);
     m.late = true;
     if (!spot) {
@@ -460,7 +474,14 @@ export class Social {
         if (n > 2 + watch.length) return null;
         return { seats: [...g, ...watch].slice(0, n), pool: [...g, ...watch] };
       }
-      case 'talk':
+      case 'talk': {
+        if (this.formal()) {
+          const seats = spots.group('debate:library').filter(free);
+          if (seats.length >= n) return { seats: seats.slice(0, n), pool: seats };
+        }
+        const pair = spots.findFreeGroup('talk', { rng: ch.rng, filter: (grp) => grp.every(free) });
+        return pair && pair.length >= n ? { seats: [...pair], pool: [...pair] } : null;
+      }
       case 'rps': {
         const g = spots.findFreeGroup('talk', { rng: ch.rng, filter: (grp) => grp.every(free) });
         if (!g) return null;
@@ -503,7 +524,7 @@ export class Social {
     const blocks: SpotDef[][] = [];
     for (const a of freePairs) {
       if (a[0].dir !== 'down') continue;
-      const b = freePairs.find((p) => p[0].dir === 'down' && p[0].tx === a[0].tx + 1);
+      const b = freePairs.find((p) => p[0].dir === 'down' && p[0].tx > a[0].tx && p[0].tx <= a[0].tx + 2);
       if (b) blocks.push([a[0], b[0], a[1], b[1]]);
     }
     if (!blocks.length) return null;
@@ -707,7 +728,7 @@ export class Social {
         g.nextAt = now + 500;
         break;
       case 'talk':
-        g.until = now + between(rng, 10_000, 18_000);
+        g.until = now + (this.formal() ? between(rng, 35_000, 60_000) : between(rng, 10_000, 18_000));
         g.nextAt = now + 400;
         break;
       case 'mirror':
@@ -754,6 +775,10 @@ export class Social {
       case 'mirror':
         [m.pose, m.held] = ['groom', rng() < 0.5 ? 'lipstick' : 'comb'];
         break;
+      case 'talk':
+        if (this.formal()) [m.pose, m.held] = [m.spot && this.sim.spots.get(m.spot)?.seated ? 'sit' : 'stand', 'papers'];
+        else [m.pose, m.held] = ['stand', 'none'];
+        break;
       default:
         [m.pose, m.held] = ['stand', 'none'];
     }
@@ -795,7 +820,7 @@ export class Social {
     // quem é de sonecas cochila no sofá na segunda metade
     for (const m of ms) {
       const c = this.charOf(m);
-      if (c && m.pose !== 'sleep' && hasTrait(personaFor(c.info.seed), 'sonecas') && now - g.startAt > (g.until - g.startAt) * 0.5) {
+      if (!this.formal() && c && m.pose !== 'sleep' && hasTrait(personaFor(c.info.seed), 'sonecas') && now - g.startAt > (g.until - g.startAt) * 0.5) {
         [m.pose, m.held] = ['sleep', 'none'];
         c.setIcon('zzz', Math.max(1_000, g.until - now), now);
       }
@@ -991,7 +1016,7 @@ export class Social {
     const p = personaFor(c.info.seed);
     const { line, topic } = this.topicLine(g, c, p, now);
     g.lastSpeaker = speaker.id;
-    this.act(speaker, 'talk', speaker.pose === 'sit' ? speaker.held : 'none', 1_700, now);
+    this.act(speaker, 'talk', this.formal() ? 'papers' : speaker.pose === 'sit' ? speaker.held : 'none', 1_700, now);
     this.say(c, line, now);
     const listeners = ms.filter((m) => m !== speaker);
     if (topic === 'piadas') {
@@ -1002,7 +1027,7 @@ export class Social {
       for (const m of listeners) this.emote(m, '👀', now + 300);
     } else if (rng() < 0.45) {
       const lc = this.charOf(this.randomOf(listeners, rng));
-      if (lc) g.pending.push({ id: lc.id, at: now + 1_100, text: L.pick(L.CHAT.react, rng) });
+      if (lc) g.pending.push({ id: lc.id, at: now + 1_100, text: L.pick(this.formal() ? LEGAL_SOCIAL.respond : L.CHAT.react, rng) });
     }
     // um gole de café de vez em quando
     for (const m of ms) if (m !== speaker && (m.held === 'coffee' || m.held === 'water') && rng() < 0.2) this.act(m, 'drink', m.held, 1_400, now);
@@ -1012,6 +1037,7 @@ export class Social {
   private topicLine(g: Gathering, c: Character, p: Persona, now: number): { line: string; topic: string } {
     const rng = g.rng;
     const vars = { nome: this.otherName(g, c, rng), sala: this.roomName(c, rng) };
+    if (this.formal()) return { line: L.pick(LEGAL_SOCIAL.discuss, rng, vars, g.lastLine), topic: 'legal' };
     const r = rng();
     if (r < 0.12) {
       const t = L.timeLine(new Date(now));
@@ -1168,10 +1194,10 @@ export class Social {
       .filter((m) => m.id !== id)
       .map((m) => this.sim.chars.get(m.id)?.info.name)
       .filter((n): n is string => !!n);
-    const label = g.kind === 'tv' && g.program ? tr('Vendo {0} na TV', [g.program === 'futebol' ? tr('futebol') : g.program === 'novela' ? tr('novela') : tr('desenho')]) : KINDS[g.kind].label;
+    const label = this.formal() && g.kind === 'talk' ? LEGAL_SOCIAL.label : g.kind === 'tv' && g.program ? tr('Vendo {0} na TV', [g.program === 'futebol' ? tr('futebol') : g.program === 'novela' ? tr('novela') : tr('desenho')]) : KINDS[g.kind].label;
     const going = g.phase === 'gather' ? tr(' (a caminho)') : '';
     const bet = g.bet && KINDS[g.kind].match ? tr(' · valendo 🪙{0}', [g.bet]) : '';
-    return `${KINDS[g.kind].emoji} ${label}${others.length ? ` com ${joinNames(others)}` : ''}${bet}${going}`;
+    return `${this.formal() && g.kind === 'talk' ? '⚖️' : KINDS[g.kind].emoji} ${label}${others.length ? ` com ${joinNames(others)}` : ''}${bet}${going}`;
   }
 
   /** Tudo o que a interface mostra da vida social de um agente presente (null se não está no escritório). */
@@ -1232,7 +1258,7 @@ export class Social {
     if (this.events.length >= MAX_EVENTS) this.events.shift();
     const first = g.members.find((m) => m.spot);
     const area = first?.spot ? this.sim.spots.get(first.spot)?.areaId : undefined;
-    const place = (area && (PLACES[area] ?? this.sim.rooms.get(area)?.info.name)) || tr('Escritório');
+    const place = (area && (PLACES[area] ?? (area === this.sim.building.corridor.id ? tr('Corredor') : this.sim.rooms.get(area)?.info.name))) || tr('Escritório');
     this.events.push({ id: `social:${g.id}:${++this.eventSeq}`, at: now, icon, agentId, text, place });
   }
 

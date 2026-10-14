@@ -9,6 +9,7 @@ import { parseAllowedHosts } from './http/guard';
 import { parseRemoteConfig, type RemoteConfig } from './http/remote';
 import { parseGithubRepo } from './updates/checker';
 import { tr } from '../shared/i18n';
+import { DISSERO_REPOSITORY } from '../shared/distribution';
 
 export interface ServerConfig {
   port: number;
@@ -22,7 +23,7 @@ export interface ServerConfig {
   home: string;
   /** Config dirs do Claude Code observados (um por conta). */
   claudeDirs: string[];
-  /** Onde o Habblaud guarda o próprio estado (nomes persistidos). */
+  /** Onde o Dissero guarda o próprio estado (nomes persistidos). */
   dataDir: string;
   /**
    * Pasta com o uso capturado pelo statusline do Claude Code (scripts/statusline-tap.mjs):
@@ -32,7 +33,7 @@ export interface ServerConfig {
   /** Nomes extras aceitos no cabeçalho Host/Origin (HABBLAUD_ALLOWED_HOSTS); localhost e IPs sempre valem. */
   allowedHosts: Set<string>;
   /**
-   * Terminal (GET /api/agents/:id/terminal) ligado: só com bind local, isto é, com o Habblaud acessível apenas
+   * Terminal (GET /api/agents/:id/terminal) ligado: só com bind local, isto é, com o Dissero acessível apenas
    * pelo próprio computador (ver terminalOffReason). É a trava de tudo o que mostra ou age sobre as sessões.
    */
   terminal: boolean;
@@ -86,7 +87,8 @@ export function findRoot(from: string): string {
 function readPackage(rootDir: string): { version: string; repo?: string } {
   try {
     const pkg = JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf8')) as { version?: unknown; repository?: unknown };
-    return { version: typeof pkg.version === 'string' ? pkg.version : '0.0.0', repo: parseGithubRepo(pkg.repository) };
+    const repo = parseGithubRepo(pkg.repository);
+    return { version: typeof pkg.version === 'string' ? pkg.version : '0.0.0', repo: repo === DISSERO_REPOSITORY ? repo : undefined };
   } catch {
     return { version: '0.0.0' };
   }
@@ -118,7 +120,7 @@ export function isLoopbackBind(value: string | undefined): boolean {
 
 /**
  * Por que o terminal fica desligado (undefined = ligado). Os transcripts têm a conversa inteira, então ele
- * só liga quando o Habblaud não fica exposto além do próprio computador:
+ * só liga quando o Dissero não fica exposto além do próprio computador:
  * - Node: o HABBLAUD_HOST precisa ser loopback;
  * - Docker: o processo sempre escuta em 0.0.0.0 dentro do container e quem decide a exposição é a porta
  *   publicada no host, HABBLAUD_BIND (o docker-compose.yml repassa o mesmo valor ao container). Ausente

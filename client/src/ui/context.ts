@@ -12,7 +12,7 @@ export interface UiComponent {
 export type PanelName = 'sidebar' | 'feed';
 
 /**
- * Uma janela de terminal só, por agente: o interativo quando a sessão roda dentro do Habblaud (pty); senão o
+ * Uma janela de terminal só, por agente: o interativo quando a sessão roda dentro do Dissero (pty); senão o
  * de leitura (com "Assumir daqui" para passar a ser interativo). Montado em ui/index.ts.
  */
 export interface TerminalRouter {
@@ -53,7 +53,7 @@ export interface UiContext {
   /** Leva a câmera de novo até a seleção atual (botão Centralizar). */
   focusSelection(): void;
   /** Comandos de câmera dos botões/atalhos da UI (cancelam o foco mantido). */
-  camera(action: 'overview' | 'zoomIn' | 'zoomOut'): void;
+  camera(action: 'overview' | 'offices' | 'follow' | 'reset' | 'zoomIn' | 'zoomOut'): void;
   /** Agenda uma renderização no próximo quadro. */
   invalidate(): void;
   /** Abre/fecha um painel (sem argumento: alterna). */
@@ -66,6 +66,8 @@ export interface UiContext {
   focusSearch(): void;
   /** Abre a ajuda; com `section`, rola até ela (ex.: "usage" = Contas e uso). */
   openHelp(section?: HelpSection): void;
+  /** Escolhe uma pasta para adicionar uma sala ao escritório. */
+  openProject?(opener?: HTMLElement): void;
   toggleSettings(): void;
   /** Abre o campo de renomear a sala perto do ponto (px da janela); botão direito na sala (ui/roomrename.ts). */
   renameRoom?(roomId: string, at: { x: number; y: number }): void;

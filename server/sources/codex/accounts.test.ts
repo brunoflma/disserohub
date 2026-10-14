@@ -52,15 +52,15 @@ describe('contas do Codex', () => {
     expect(parseToolAliases("alias cx='codex'\nalias c='claude'", h.dir, 'codex')).toEqual([{ name: 'cx' }]);
     const accs = detectCodexAccounts([main, work, third], { home: h.dir, env: {}, taken: { shorts: ['C', 'X'], colors: [ACCOUNT_COLORS[0]] } });
     expect(accs.map((a) => [a.id, a.provider, a.short, a.name, a.configDir])).toEqual([
-      ['.codex', 'codex', 'CX', 'Codex CX', main],
-      ['.codex-trabalho', 'codex', 'CW', 'Codex CW', work],
+      ['.codex', 'codex', 'CX', 'ChatGPT CX', main],
+      ['.codex-trabalho', 'codex', 'CW', 'ChatGPT CW', work],
       // Sem alias: a inicial do sufixo (X) já é do Claude Code: a próxima livre.
-      ['.codex-x', 'codex', 'Y', 'Codex Y', third],
+      ['.codex-x', 'codex', 'Y', 'ChatGPT Y', third],
     ]);
     expect(accs.map((a) => a.color)).toEqual([ACCOUNT_COLORS[1], ACCOUNT_COLORS[2], ACCOUNT_COLORS[3]]);
-    // Uma conta só: "Codex".
-    expect(detectCodexAccounts([main], { home: h.dir, env: {} })[0]).toMatchObject({ short: 'CX', name: 'Codex' });
-    expect(detectCodexAccounts([third], { home: h.dir, env: {} })[0]).toMatchObject({ short: 'X', name: 'Codex' });
+    // Uma conta só: "ChatGPT".
+    expect(detectCodexAccounts([main], { home: h.dir, env: {} })[0]).toMatchObject({ short: 'CX', name: 'ChatGPT' });
+    expect(detectCodexAccounts([third], { home: h.dir, env: {} })[0]).toMatchObject({ short: 'X', name: 'ChatGPT' });
   });
 
   it('Docker: metadados vindos do host (configDir do host, letra, cor, nome) casados pela pasta montada', () => {
@@ -77,7 +77,7 @@ describe('contas do Codex', () => {
     ]);
     // As contas do Claude Code não pegam o override do Codex (nem pela pasta montada).
     expect(discoverClaudeDirs(env, h.dir)).not.toContain(mounted);
-    expect(detectAccounts([join(h.dir, '.codex-claude')], { home: h.dir, env: { HABBLAUD_ACCOUNTS: JSON.stringify([{ id: '.codex-claude', provider: 'codex', name: 'Codex' }]) } })[0].name).toBe('Conta A');
+    expect(detectAccounts([join(h.dir, '.codex-claude')], { home: h.dir, env: { HABBLAUD_ACCOUNTS: JSON.stringify([{ id: '.codex-claude', provider: 'codex', name: 'Codex' }]) } })[0].name).toBe('Claude');
   });
 
   it('plano do rate_limits para exibir', () => {

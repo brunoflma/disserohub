@@ -6,7 +6,7 @@ import type { ArtModule, Dir, RoomTheme } from '../../art/api';
 import type { WorldOptions } from '../api';
 import { COL_W, COMPACT_DELAY_MS, DISMANTLE_DELAY_MS, FOOT_DX, FOOT_DY, MISSING_DEBOUNCE_MS, RUN_SPEED, TILE, WALK_SPEED } from '../constants';
 import { assembleBuilding, type BuildingLayout } from '../layout/building';
-import { RECEPTION_ID } from '../layout/core';
+import { LOUNGE_ID, RECEPTION_ID } from '../layout/core';
 import { columnsFor, inRect } from '../layout/geometry';
 import { layoutProjectRoom } from '../layout/room';
 import type { SpotDef, SpotKind } from '../layout/types';
@@ -19,9 +19,10 @@ import { browserStorage, type StorageLike } from '../social/wallet';
 import {
   canDismantle,
   chooseSeat,
+  IDLE_NAP_MS,
+  idleRestMs,
   idleSitMs,
   isLastInRoom,
-  isLongIdle,
   modeFor,
   pickIdleActivity,
   shouldRun,
@@ -34,6 +35,7 @@ import { RoomFxState } from './github';
 import { RoomState } from './room-state';
 import { countShells, latestShellDone, shellLabel, shellStage, shellWaitSince, spinDir, spinPhase, yawnPhase } from './shell';
 import { SpotRegistry } from './spots';
+import { legalIdleWeights } from '../../local/legal-social';
 import type { Step } from './steps';
 import { tr } from '../../../../shared/i18n';
 
@@ -64,16 +66,12 @@ const FALLBACK_THEME: RoomTheme = {
 };
 
 const LOUNGE_SEATS: SpotKind[] = ['sofa', 'armchair', 'beanbag'];
+const RECEPTION_SEATS: SpotKind[] = ['armchair', 'bench', 'sofa'];
 /** Onde dá para sentar e mexer no celular. */
 const PHONE_SEATS: SpotKind[] = ['beanbag', 'sofa', 'armchair', 'cafe_seat', 'bench'];
-/** Assentos de descanso possíveis já na carga inicial (bancos de corredor/banheiro não). */
-const INITIAL_LOUNGE_SEATS: SpotKind[] = ['sofa', 'armchair', 'beanbag', 'cafe_seat'];
-/** Fração dos ociosos elegíveis que começa fora da mesa. */
-const INITIAL_LOUNGE_SHARE = 0.15;
-/** Só quem está ocioso há pelo menos isto pode começar descansando (quem acabou de parar volta logo). */
-const INITIAL_LOUNGE_MIN_IDLE_MS = 90_000;
-/** Ninguém sai para passear nos primeiros segundos depois de abrir a página. */
-const INITIAL_OUTING_DELAY_MS = 5_000;
+/** Poltronas primeiro; bancos e mesas da copa são alternativas quando os lugares estão ocupados. */
+const REST_SEATS: SpotKind[] = ['armchair', 'sofa', 'beanbag', 'nook', 'cafe_seat', 'bench'];
+const NAP_SEATS: SpotKind[] = ['armchair', 'sofa', 'beanbag', 'nook'];
 const ENTER_MS = 180;
 
 function between(rng: () => number, a: number, b: number): number {
@@ -126,7 +124,7 @@ export class Sim {
     private readonly options: () => WorldOptions,
     storage: StorageLike | null = browserStorage(),
   ) {
-    this.social = new Social(this, storage);
+    this.social = new Social(this, storage, () => this.options().legalOffice === true);
     this.building = assembleBuilding(columnsFor([]), [], 0);
     this.finder = new PathFinder(this.building.grid);
     this.spots.setSpots(this.building.spots);
@@ -211,10 +209,9 @@ export class Sim {
       this.refreshShell(ch, now);
     }
     if (first) {
-      // quem trabalha/espera senta primeiro; ociosos depois (assim nenhuma sala fica vazia)
-      const seated = new Set<string>();
+      // Reserva as mesas de quem está trabalhando antes dos assentos dos ociosos.
       const order = [...fresh].sort((a, b) => Number(a.mode === 'idle') - Number(b.mode === 'idle'));
-      for (const ch of order) this.placeInitial(ch, now, seated);
+      for (const ch of order) this.placeInitial(ch, now);
     }
     this.refreshRoomInfo();
   }
@@ -419,35 +416,21 @@ export class Sim {
   }
 
   /**
-   * Carga inicial: todos começam no lugar natural (a própria mesa), sem ninguém "parado no
-   * corredor". Só uma minoria dos ociosos de verdade (parados há um tempo, sem cochilar) aparece
-   * num sofá/poltrona/puff/café — nunca em banco de corredor ou banheiro, e nunca esvaziando a sala.
+   * Quem trabalha começa na mesa; quem está ocioso ocupa um assento de descanso livre.
    */
-  private placeInitial(ch: Character, now: number, roomsSeated: Set<string>): void {
+  private placeInitial(ch: Character, now: number): void {
     this.assignHome(ch);
     const home = this.spots.get(ch.homeSpot);
-    // primeiro passeio só depois de alguns segundos: a carga inicial mostra todos no lugar
-    ch.nextOutingAt = now + INITIAL_OUTING_DELAY_MS + idleSitMs(ch.rng, this.options().liveliness) * ch.rng();
-    const relaxing =
-      ch.mode === 'idle' &&
-      !!home &&
-      roomsSeated.has(ch.roomId) &&
-      now - ch.info.statusSince >= INITIAL_LOUNGE_MIN_IDLE_MS &&
-      !isLongIdle(ch.info.status, ch.info.statusSince, now) &&
-      ch.rng() < INITIAL_LOUNGE_SHARE;
-    if (relaxing) {
-      const seat = this.randomFree(INITIAL_LOUNGE_SEATS, ch);
-      if (seat && this.spots.reserve(seat.id, ch.id)) {
-        ch.tempSpots.push(seat.id);
+    ch.nextOutingAt = now + idleRestMs(ch.rng, this.options().liveliness);
+    if (ch.mode === 'idle') {
+      const seat = this.restSeat(ch);
+      if (seat && this.reserveTemp(ch, seat)) {
         this.snapTo(ch, seat);
-        const held = seat.kind === 'cafe_seat' ? 'coffee' : 'none';
-        ch.queue.push({ t: 'act', pose: 'sit', held, ms: between(ch.rng, 4000, 14000) }, { t: 'exit' }, { t: 'do', fn: () => this.releaseTemp(ch) });
         return;
       }
     }
     if (home) {
       this.snapTo(ch, home);
-      roomsSeated.add(ch.roomId);
     } else this.placeOverflow(ch);
   }
 
@@ -573,7 +556,8 @@ export class Sim {
       if (ch.info.kind === 'sub' && !ch.leaving) this.refreshMode(ch);
       // comando em primeiro plano passou dos 10 s (ou a espera acabou): muda de modo sem snapshot novo
       else if (!ch.leaving && (ch.mode === 'shell' || (ch.info.status === 'working' && ch.info.shells?.length))) this.refreshMode(ch);
-      if (ch.mode === 'idle' && isLongIdle(ch.info.status, ch.info.statusSince, now) && ch.atSpot === ch.homeSpot && ch.pose === 'sleep' && ch.icon !== 'zzz') {
+      const seat = this.spots.get(ch.atSpot);
+      if (ch.mode === 'idle' && ch.seated && ch.pose === 'sleep' && seat && NAP_SEATS.includes(seat.kind) && ch.icon !== 'zzz') {
         ch.setIcon('zzz', 1e12, now);
       }
     }
@@ -746,7 +730,7 @@ export class Sim {
     ch.updateLane(dt);
     if (ch.icon && now >= ch.iconUntil) ch.icon = null;
     // "zzz" só enquanto dorme: quem levanta (uma roda chamou, festa na sala, um passeio) acordou, e o ícone não vai
-    // junto. O cochilo na mesa de quem está ocioso há muito tempo não muda o modo, então ninguém mais o apagaria.
+    // junto. O cochilo de quem está ocioso não muda o modo, então ninguém mais o apagaria.
     if (ch.icon === 'zzz' && ch.pose !== 'sleep') ch.icon = null;
     if (ch.mode === 'shell' && ch.shellSince) ch.shellStage = shellStage(now - ch.shellSince);
     if (!ch.step) {
@@ -1151,6 +1135,20 @@ export class Sim {
     const room = this.rooms.get(ch.roomId);
     if (!room || !room.present) return this.planLobby(ch, room);
     this.assignHome(ch);
+    if (ch.mode === 'idle') {
+      ch.arriving = false;
+      ch.standTile = null;
+      const seat = this.spots.get(ch.atSpot);
+      if (!seat || !REST_SEATS.includes(seat.kind)) {
+        if (this.planRest(ch)) return true;
+      }
+      if (!ch.nextOutingAt) ch.nextOutingAt = now + idleRestMs(ch.rng, this.options().liveliness);
+      if (now >= ch.nextOutingAt) {
+        if (this.planOuting(ch, now)) return true;
+        ch.nextOutingAt = now + idleSitMs(ch.rng, this.options().liveliness);
+      }
+      return false;
+    }
     if (!ch.homeSpot) return this.planOverflow(ch, room);
     ch.standTile = null;
     // sala apagada: o primeiro a chegar acende a luz
@@ -1172,13 +1170,6 @@ export class Sim {
     }
     if (ch.atSpot !== ch.homeSpot) return this.planGoHome(ch, now);
     ch.arriving = false;
-    if (ch.mode === 'idle' && !isLongIdle(ch.info.status, ch.info.statusSince, now)) {
-      if (!ch.nextOutingAt) ch.nextOutingAt = now + idleSitMs(ch.rng, this.options().liveliness);
-      if (now >= ch.nextOutingAt) {
-        if (this.planOuting(ch, now)) return true;
-        ch.nextOutingAt = now + idleSitMs(ch.rng, this.options().liveliness);
-      }
-    }
     // esperando um shell: só sai da mesa para uma roda (sozinho, fica na pipoca)
     if (ch.mode === 'shell') {
       if (!ch.nextSocialAt) ch.nextSocialAt = now + idleSitMs(ch.rng, this.options().liveliness) * 1.3;
@@ -1448,6 +1439,25 @@ export class Sim {
     return cands[Math.floor(ch.rng() * cands.length)];
   }
 
+  private restSeat(ch: Character): SpotDef | null {
+    for (const kind of REST_SEATS) {
+      const seat = this.spots.findFree(kind, { near: ch, by: ch.id, filter: (s) => kind !== 'bench' || s.areaId === RECEPTION_ID });
+      if (seat) return seat;
+    }
+    return null;
+  }
+
+  private planRest(ch: Character, held: 'none' | 'coffee' | 'water' = 'none'): boolean {
+    const seat = this.restSeat(ch);
+    if (!seat || !this.reserveTemp(ch, seat)) return false;
+    const steps: Step[] = [];
+    this.pushLeave(ch, steps);
+    steps.push({ t: 'go', tx: seat.tx, ty: seat.ty, held }, { t: 'enter', spot: seat.id });
+    steps.push({ t: 'do', fn: () => (ch.nextOutingAt = this.now + idleRestMs(ch.rng, this.options().liveliness)) });
+    ch.queue.push(...steps);
+    return true;
+  }
+
   private planOuting(ch: Character, now: number): boolean {
     const near = { tx: ch.tx, ty: ch.ty };
     const rng = ch.rng;
@@ -1458,7 +1468,8 @@ export class Sim {
       coffee: !!this.spots.findFree('coffee', { by: ch.id }),
       water: !!this.spots.findFree('water', { by: ch.id }),
       bathroom: !!this.spots.findFree('stall', { by: ch.id }),
-      lounge: LOUNGE_SEATS.some((k) => !!this.spots.findFree(k, { by: ch.id })),
+      lounge: LOUNGE_SEATS.some((k) => !!this.spots.findFree(k, { by: ch.id, filter: (s) => s.areaId === LOUNGE_ID })),
+      reception: RECEPTION_SEATS.some((kind) => !!this.spots.findFree(kind, { by: ch.id, filter: (s) => s.areaId === RECEPTION_ID })),
       // jogos e conversas são rodas (social/): aqui só o que se faz sozinho
       pingpong: false,
       talk: false,
@@ -1470,7 +1481,8 @@ export class Sim {
       mirror: !!this.social.plan('mirror', 1, ch),
       phone: !!this.randomFree(PHONE_SEATS, ch),
     };
-    const what = pickIdleActivity(rng, avail, soloWeights(persona));
+    const weights = soloWeights(persona);
+    const what = pickIdleActivity(rng, avail, this.options().legalOffice ? legalIdleWeights(weights) : weights);
     if (!what) return false;
     const steps: Step[] = [];
     const goUse = (s: SpotDef, held: 'none' | 'coffee' = 'none'): void => {
@@ -1526,12 +1538,22 @@ export class Sim {
         }
         break;
       }
+      case 'reception': {
+        const opts = { by: ch.id, rng, filter: (s: SpotDef) => s.areaId === RECEPTION_ID };
+        const s = RECEPTION_SEATS.map((kind) => this.spots.findFree(kind, opts)).find((seat) => !!seat);
+        if (!s || !this.reserveTemp(ch, s)) return false;
+        this.pushLeave(ch, steps);
+        steps.push({ t: 'go', tx: s.tx, ty: s.ty }, { t: 'enter', spot: s.id }, { t: 'act', pose: 'read', held: this.options().legalOffice ? 'papers' : 'phone', ms: between(rng, 12_000, 25_000) }, { t: 'exit' });
+        release(s);
+        break;
+      }
       case 'lounge': {
-        const s = this.randomFree(LOUNGE_SEATS, ch);
+        const s = LOUNGE_SEATS.map((kind) => this.spots.findFree(kind, { by: ch.id, rng, filter: (s) => s.areaId === LOUNGE_ID })).find((seat) => !!seat);
         if (!s || !this.reserveTemp(ch, s)) return false;
         this.pushLeave(ch, steps);
         steps.push({ t: 'go', tx: s.tx, ty: s.ty }, { t: 'enter', spot: s.id });
-        if (rng() < (hasTrait(persona, 'sonecas') ? 0.7 : 0.25)) steps.push({ t: 'act', pose: 'sit', ms: between(rng, 3000, 6000) }, { t: 'act', pose: 'sleep', ms: between(rng, 8000, 16000), icon: 'zzz' });
+        if (this.options().legalOffice) steps.push({ t: 'act', pose: 'read', held: 'book', ms: between(rng, 20_000, 40_000) });
+        else if (rng() < (hasTrait(persona, 'sonecas') ? 0.7 : 0.25)) steps.push({ t: 'act', pose: 'sit', ms: between(rng, 3000, 6000) }, { t: 'act', pose: 'sleep', ms: between(rng, 8000, 16000), icon: 'zzz' });
         else steps.push({ t: 'act', pose: 'sit', ms: between(rng, 9000, 22000), icon: rng() < 0.3 ? 'music' : undefined });
         steps.push({ t: 'exit' });
         release(s);
@@ -1591,12 +1613,9 @@ export class Sim {
         break;
       }
       case 'stretch': {
-        const home = ch.homeSpot;
-        if (!home) return false;
-        steps.push({ t: 'exit' }, { t: 'act', pose: 'stretch', ms: 2600 }, { t: 'enter', spot: home });
-        steps.push({ t: 'do', fn: () => (ch.nextOutingAt = this.now + idleSitMs(ch.rng, this.options().liveliness)) });
-        ch.queue.push(...steps);
-        return true;
+        this.pushLeave(ch, steps);
+        steps.push({ t: 'act', pose: 'stretch', ms: 2600 });
+        break;
       }
     }
     ch.queue.push(...steps);
@@ -1605,10 +1624,14 @@ export class Sim {
     return true;
   }
 
-  /** Volta para a mesa ao final de um passeio. */
+  /** Volta ao descanso quando ocioso; quem espera um shell volta à mesa. */
   pushHome(ch: Character, held: 'none' | 'coffee' | 'water'): void {
     const home = this.spots.get(ch.homeSpot);
     ch.queue.push({ t: 'do', fn: () => this.releaseTemp(ch) });
+    if (ch.mode === 'idle') {
+      ch.queue.push({ t: 'do', fn: () => this.planRest(ch, held) });
+      return;
+    }
     if (!home) return;
     ch.queue.push({ t: 'go', tx: home.tx, ty: home.ty, held }, { t: 'enter', spot: home.id });
     ch.queue.push({ t: 'do', fn: () => (ch.nextOutingAt = this.now + idleSitMs(ch.rng, this.options().liveliness)) });
@@ -1642,7 +1665,7 @@ export class Sim {
     if (atHome && ch.mode === 'work') ch.setPose('type', laptop ? 'laptop' : 'none');
     else if (atHome && ch.mode === 'wait') ch.setPose('raise_hand');
     else if (atHome && ch.mode === 'shell') this.shellPose(ch, spot, now);
-    else if (ch.mode === 'idle' && isLongIdle(ch.info.status, ch.info.statusSince, now)) ch.setPose('sleep');
+    else if (ch.mode === 'idle' && spot.areaId !== RECEPTION_ID && NAP_SEATS.includes(spot.kind) && now - ch.info.statusSince >= IDLE_NAP_MS) ch.setPose('sleep');
     else ch.setPose('sit');
   }
 
@@ -1651,6 +1674,11 @@ export class Sim {
    * com giros na cadeira, bocejos sob a teia e, por fim, o cochilo. Sem alocação (roda por frame).
    */
   private shellPose(ch: Character, spot: SpotDef, now: number): void {
+    if (this.options().legalOffice) {
+      ch.dir = spot.dir;
+      ch.setPose('read', 'papers');
+      return;
+    }
     const age = now - ch.shellSince;
     switch (ch.shellStage ?? shellStage(age)) {
       case 'popcorn':
@@ -1716,9 +1744,11 @@ export class Sim {
       if (ch.mode === 'work' || ch.mode === 'wait' || ch.mode === 'idle' || ch.mode === 'shell') {
         ch.reactUntil = 0;
         this.assignHome(ch);
+        this.releaseTemp(ch);
         const home = this.spots.get(ch.homeSpot);
-        if (home) {
-          this.snapTo(ch, home);
+        const seat = ch.mode === 'idle' ? this.restSeat(ch) : home;
+        if (seat && (ch.mode !== 'idle' || this.reserveTemp(ch, seat))) {
+          this.snapTo(ch, seat);
           ch.standTile = null;
         } else {
           ch.atSpot = null;
@@ -1726,8 +1756,7 @@ export class Sim {
           ch.sortY = null;
           this.placeOverflow(ch);
         }
-        this.releaseTemp(ch);
-        ch.nextOutingAt = now + idleSitMs(ch.rng, this.options().liveliness);
+        ch.nextOutingAt = now + idleRestMs(ch.rng, this.options().liveliness);
       }
     }
     for (const room of this.rooms.values()) {

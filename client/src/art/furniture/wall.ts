@@ -96,6 +96,27 @@ export function clock(): BufFurniture {
 }
 
 export function poster(variant: string | undefined): BufFurniture {
+  if (variant === 'law_justice') {
+    const s = wallSheet(1);
+    const b = s.buf;
+    // Larger ivory field and a dark silhouette: the two bowls read as scales at office zoom.
+    b.rect(0, -31, 16, 27, '#7c6849');
+    b.rect(1, -30, 14, 25, '#d6bd84');
+    b.rect(2, -29, 12, 23, '#f6efdf');
+    const ink = '#233c49';
+    b.rect(7, -26, 2, 17, ink);
+    b.rect(2, -23, 12, 2, ink);
+    for (const x of [4, 11]) b.vline(x, -21, -18, ink);
+    for (const x of [1, 9]) {
+      b.hline(x, x + 5, -17, ink);
+      b.hline(x + 1, x + 4, -16, ink);
+      b.hline(x + 2, x + 3, -15, ink);
+    }
+    b.hline(5, 10, -9, ink);
+    b.hline(4, 11, -8, '#a4874f');
+    b.outline();
+    return { base: s };
+  }
   const s = wallSheet(1);
   const b = s.buf;
   const x = 2;
@@ -108,6 +129,21 @@ export function poster(variant: string | undefined): BufFurniture {
   const iw = w - 2;
   const ih = h - 2;
   switch (variant ?? 'code') {
+    case 'law_charter': {
+      b.rect(ix, iy, iw, ih, '#ece3cf');
+      b.hline(ix + 2, ix + 7, iy + 2, '#625744');
+      for (const y of [5, 7, 9]) b.hline(ix + 2, ix + 7, iy + y, '#a49a85');
+      b.ellipse(ix + 5, iy + 11, 3, 3, '#873e4a');
+      break;
+    }
+    case 'law_columns': {
+      b.rect(ix, iy, iw, ih, '#eee6d6');
+      b.hline(ix + 1, ix + 8, iy + 3, '#b49862');
+      b.hline(ix + 2, ix + 7, iy + 2, '#b49862');
+      for (const x of [2, 5, 8]) b.vline(ix + x, iy + 5, iy + 10, '#6e7c85');
+      b.hline(ix + 1, ix + 8, iy + 12, '#b49862');
+      break;
+    }
     case 'coffee': {
       b.rect(ix, iy, iw, ih, '#f2d7b0');
       b.rect(ix, iy + ih - 4, iw, 4, '#c98a52');

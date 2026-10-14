@@ -46,18 +46,20 @@ describe('ferramenta (Claude Code ou Codex)', () => {
     expect(fallbackShort('...', 'codex')).toBe('X');
   });
 
-  it('selo "Codex": só no Codex, e sem repetir o nome da conta', () => {
+  it('selo "ChatGPT": só no Codex, e sem repetir o nome da conta', () => {
     expect(showsProviderTag('codex', 'Conta X')).toBe(true);
     expect(showsProviderTag('codex', 'Codex')).toBe(false);
     expect(showsProviderTag('codex', 'Demo Codex')).toBe(false);
+    expect(showsProviderTag('codex', 'ChatGPT')).toBe(false);
+    expect(showsProviderTag('codex', 'ChatGPT X')).toBe(false);
     expect(showsProviderTag('claude', 'Conta C')).toBe(false);
   });
 
   it('rótulo do chip: e-mail no Claude Code; ferramenta e plano no Codex', () => {
     expect(accountChipLabel({ name: 'Conta C', email: 'a@b.c' }, '.claude', 'claude')).toBe('Conta C (a@b.c)');
-    expect(accountChipLabel({ name: 'Conta X', plan: 'Team', provider: 'codex' }, '.codex', 'codex')).toBe('Conta X · Codex · plano Team');
+    expect(accountChipLabel({ name: 'Conta X', plan: 'Team', provider: 'codex' }, '.codex', 'codex')).toBe('Conta X · ChatGPT · plano Team');
     expect(accountChipLabel({ name: 'Codex', plan: 'Team', provider: 'codex' }, '.codex', 'codex')).toBe('Codex · plano Team');
-    expect(accountChipLabel(undefined, '.codex', 'codex')).toBe('.codex · Codex');
+    expect(accountChipLabel(undefined, '.codex', 'codex')).toBe('.codex · ChatGPT');
     expect(accountChipLabel(undefined, '', 'claude')).toBe('Conta desconhecida');
   });
 

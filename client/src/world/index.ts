@@ -3,11 +3,12 @@
 import * as artModule from '../art';
 import { TILE, type ArtModule } from '../art/api';
 import type { OfficeStore } from '../net/store';
-import { DEFAULT_WORLD_OPTIONS, seasonalThemeFor, type Selection, type SocialEvent, type SoundCue, type WorldApi, type WorldOptions, type WorldPlayback } from './api';
+import { DEFAULT_WORLD_OPTIONS, seasonalThemeFor, type CameraView, type Selection, type SocialEvent, type SoundCue, type WorldApi, type WorldOptions, type WorldPlayback } from './api';
+import { cameraRestoreMode } from '../local/camera-memory';
 import { loadWorldAssets, type WorldAssets } from './assets';
-import { Camera, overviewFrame } from './camera';
+import { Camera, interiorFrameBounds, overviewFrame } from './camera';
 import { createDebug, type WorldDebug } from './debug';
-import { BUILDING_H, COL_W } from './constants';
+import { BUILDING_H, COL_W, ZOOM_MAX } from './constants';
 import { inRect } from './layout/geometry';
 import { attachInput, type Hit } from './input';
 import { rebaseSnapshot } from './playback';
@@ -37,6 +38,13 @@ export function createWorld(canvas: HTMLCanvasElement, store: OfficeStore): Worl
   const socialCbs = new Set<(e: SocialEvent) => void>();
   const soundCbs = new Set<(c: SoundCue) => void>();
   const roomMenuCbs = new Set<(roomId: string, at: { x: number; y: number }) => void>();
+  const cameraCbs = new Set<(state: CameraView) => void>();
+  let savedCamera: CameraView | null = null;
+  let cameraMode: CameraView['mode'] = 'offices';
+  let cameraDirty = false;
+  let cameraChangedAt = 0;
+  let lastCameraPosition = '';
+  let lastDrawTs = 0;
   let cues = new SoundCues(sim, camera);
   let selection: Selection = null;
   let hover: string | null = null;
@@ -69,20 +77,46 @@ export function createWorld(canvas: HTMLCanvasElement, store: OfficeStore): Worl
 
   const updateBounds = () => {
     const b = buildingRect();
-    camera.bounds = { x: b.x - 7 * TILE, y: b.y - 6 * TILE, w: b.w + 14 * TILE, h: b.h + 18 * TILE };
-    const fit = camera.fitZoom(b, 16);
+    camera.bounds = interiorFrameBounds(b);
+    const fit = overviewFrame(b, camera.viewW, camera.viewH, camera.insets).zoom;
     camera.minZoom = Math.min(1, Math.max(0.25, fit));
     camera.clamp();
   };
 
+  // Start at a readable scale; an explicit overview still fits every room.
+  let fitAllRooms = false;
+  const rememberCamera = (mode: CameraView['mode']) => { cameraMode = mode; cameraDirty = true; cameraChangedAt = Date.now(); };
+  const restoreCamera = (state: CameraView) => {
+    const mode = cameraRestoreMode(state, sim.building.cols, camera.viewW, camera.viewH);
+    cameraMode = mode;
+    fitAllRooms = mode === 'overview';
+    if (mode === 'manual') {
+      userMoved = true;
+      camera.stop();
+      camera.zoom = Math.max(camera.minZoom, Math.min(ZOOM_MAX, state.zoom));
+      camera.x = state.x;
+      camera.y = state.y;
+      camera.clamp();
+    } else {
+      userMoved = false;
+      overview(false);
+    }
+  };
   const overviewTarget = () => {
-    const f = overviewFrame(buildingRect(), camera.viewW, camera.viewH, camera.insets);
-    const fit = Math.max(camera.minZoom, f.zoom);
+    const b = buildingRect();
+    const f = overviewFrame(b, camera.viewW, camera.viewH, camera.insets);
+    const freeH = Math.max(80, camera.viewH - camera.insets.top - camera.insets.bottom - 40);
+    const readable = Math.max(1, Math.min(1.5, freeH / interiorFrameBounds(b).h));
+    const fit = Math.max(camera.minZoom, f.zoom, fitAllRooms ? 0 : readable);
     const snapped = camera.snapZoom(fit, 'down');
-    const zoom = snapped >= fit * 0.82 ? snapped : fit;
+    const zoom = snapped >= fit * 0.97 ? snapped : fit;
     const z = Math.min(zoom, 4);
-    const c = camera.centerFor(f.cx, f.cy, z);
-    // as margens de tela (pílulas acima, meio-fio abaixo) não são simétricas
+    const projects = [...sim.rooms.values()].filter((room) => room.present && room.listed);
+    const cx = !fitAllRooms && projects.length
+      ? (Math.min(...projects.map((room) => room.layout.rect.x)) + Math.max(...projects.map((room) => room.layout.rect.x + room.layout.rect.w))) * TILE / 2
+      : f.cx;
+    const c = camera.centerFor(cx, f.cy, z);
+    // The title clearance above rooms is larger than the lower edge clearance.
     return { x: c.x, y: c.y - f.dy / z, zoom: z };
   };
 
@@ -121,7 +155,10 @@ export function createWorld(canvas: HTMLCanvasElement, store: OfficeStore): Worl
     const ch = sim.chars.get(id);
     if (!ch) return;
     userMoved = true;
-    const zoom = Math.max(camera.zoom, camera.snapZoom(3));
+    const freeW = Math.max(80, camera.viewW - camera.insets.left - camera.insets.right);
+    const preferred = Math.max(1, Math.min(2, freeW / ((COL_W + 2) * TILE)));
+    const snapped = camera.snapZoom(preferred, 'down');
+    const zoom = snapped >= preferred * 0.97 ? snapped : preferred;
     const c = camera.centerFor(ch.x, ch.y - 12, zoom);
     camera.animateTo(c.x, c.y, zoom, Date.now(), 420);
     camera.follow = opts.follow ? id : null;
@@ -141,6 +178,7 @@ export function createWorld(canvas: HTMLCanvasElement, store: OfficeStore): Worl
   };
 
   const zoomStep = (steps: number, sx = camera.viewW / 2, sy = camera.viewH / 2) => {
+    rememberCamera('manual');
     userMoved = true;
     camera.zoomAt(camera.stepZoom(steps), sx, sy, Date.now(), true);
   };
@@ -189,10 +227,15 @@ export function createWorld(canvas: HTMLCanvasElement, store: OfficeStore): Worl
     },
     interact: () => {
       userMoved = true;
+      rememberCamera('manual');
       camera.follow = null;
       camera.stop();
     },
-    overview: () => overview(true),
+    overview: () => {
+      fitAllRooms = true;
+      rememberCamera('overview');
+      overview(true);
+    },
     zoomStep,
   });
 
@@ -225,6 +268,8 @@ export function createWorld(canvas: HTMLCanvasElement, store: OfficeStore): Worl
 
   const loop = (ts: number) => {
     raf = requestAnimationFrame(loop);
+    if (document.hidden || (options.economy && ts - lastDrawTs < 1000 / 30 - 1)) return;
+    lastDrawTs = ts;
     const real = Date.now();
     const realDt = lastTs ? Math.min(0.1, Math.max(0, (ts - lastTs) / 1000)) : 1 / 60;
     lastTs = ts;
@@ -243,18 +288,28 @@ export function createWorld(canvas: HTMLCanvasElement, store: OfficeStore): Worl
         if (!playback) for (const e of events) for (const cb of socialCbs) cb(e);
         events.length = 0;
       }
-      renderer.sync(seasonalThemeFor(options.theme, new Date()));
+      renderer.sync(seasonalThemeFor(options.theme, new Date()), options.legalOffice === true);
       if (sim.building.cols !== lastCols) {
         lastCols = sim.building.cols;
         updateBounds();
         if (!framed && sim.initialized) {
           overview(false);
           framed = true;
+          if (savedCamera) { restoreCamera(savedCamera); savedCamera = null; }
         } else if (!userMoved) overview(true);
       }
       const followCh = camera.follow ? sim.chars.get(camera.follow) : undefined;
       if (camera.follow && !followCh) camera.follow = null;
       camera.update(real, followCh ? camera.centerFor(followCh.x, followCh.y - 12, camera.zoom) : null, realDt);
+      if (cameraDirty && !playback && !camera.follow) {
+        const position = `${camera.x}:${camera.y}:${camera.zoom}`;
+        if (position !== lastCameraPosition) { lastCameraPosition = position; cameraChangedAt = real; }
+        if (!camera.animating && real - cameraChangedAt >= 650) {
+          cameraDirty = false;
+          const state: CameraView = { x: camera.x, y: camera.y, zoom: camera.zoom, cols: sim.building.cols, width: camera.viewW, height: camera.viewH, mode: cameraMode };
+          cameraCbs.forEach((cb) => cb(state));
+        }
+      }
       renderer.frame(now, dt, options, { agent: selection?.type === 'agent' ? selection.id : null, room: selection?.type === 'room' ? selection.id : null, hover });
       overlay.draw(now, options, { agent: selection?.type === 'agent' ? selection.id : null, room: selection?.type === 'room' ? selection.id : null, hover });
       renderer.pruneHeads();
@@ -349,10 +404,24 @@ export function createWorld(canvas: HTMLCanvasElement, store: OfficeStore): Worl
     focusRoom,
     overview: () => {
       userMoved = false;
+      fitAllRooms = true;
+      rememberCamera('overview');
       overview(true);
     },
+    offices: () => {
+      userMoved = false;
+      fitAllRooms = false;
+      rememberCamera('offices');
+      overview(true);
+    },
+    restoreCamera: (state) => {
+      if (framed) restoreCamera(state);
+      else savedCamera = state;
+    },
+    onCameraChange: (cb) => { cameraCbs.add(cb); return () => void cameraCbs.delete(cb); },
     zoomBy: (factor) => {
       if (!Number.isFinite(factor) || factor <= 0 || factor === 1) return;
+      rememberCamera('manual');
       const target = camera.snapZoom(camera.zoom * factor, factor > 1 ? 'up' : 'down');
       if (Math.abs(target - camera.zoom) < 1e-3) zoomStep(factor > 1 ? 1 : -1);
       else {
@@ -409,6 +478,7 @@ export function createWorld(canvas: HTMLCanvasElement, store: OfficeStore): Worl
       hoverCbs.clear();
       socialCbs.clear();
       soundCbs.clear();
+      cameraCbs.clear();
     },
     get debug() {
       return debug;

@@ -312,14 +312,25 @@
   width: 16px;
   height: 16px;
   border-radius: 4px;
-  background: var(--acc);
-  color: #12151d;
-  /* Fonte do sistema: a letra da conta precisa ser lida sem ambiguidade ("C" vs "O"). */
+  background: #161b26;
+  color: var(--acc);
   font: 800 10.5px/1 var(--font-ui);
   letter-spacing: 0;
   box-shadow:
-    inset 0 -2px 0 rgba(0, 0, 0, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    inset 0 0 0 1px var(--acc);
+}
+
+.ui-provider-logo {
+  display: block;
+  width: calc(100% - 4px);
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.ui-acc-chip[data-provider='claude'] .ui-provider-logo {
+  image-rendering: pixelated;
 }
 
 .ui-acc-chip--md {
@@ -334,38 +345,10 @@
   height: 30px;
   border-radius: 7px;
   font-size: 16px;
-  box-shadow:
-    inset 0 -3px 0 rgba(0, 0, 0, 0.24),
-    inset 0 2px 0 rgba(255, 255, 255, 0.35);
+  box-shadow: inset 0 0 0 1px var(--acc);
 }
 
-/* Conta do Codex: chip "vazado" (fundo escuro, borda e letra na cor da conta) com cantos em degrau, como um pixel
-   arredondado. Lê-se de longe como "outra ferramenta" sem precisar de logotipo. */
-.ui-acc-chip[data-provider='codex'] {
-  --step: 2px;
-  border-radius: 0;
-  background: #161b26;
-  color: var(--acc);
-  box-shadow:
-    inset 0 0 0 var(--step) var(--acc),
-    inset 0 calc(var(--step) * -2) 0 rgba(0, 0, 0, 0.3);
-  clip-path: polygon(
-    var(--step) 0,
-    calc(100% - var(--step)) 0,
-    100% var(--step),
-    100% calc(100% - var(--step)),
-    calc(100% - var(--step)) 100%,
-    var(--step) 100%,
-    0 calc(100% - var(--step)),
-    0 var(--step)
-  );
-}
-
-.ui-acc-chip--lg[data-provider='codex'] {
-  --step: 3px;
-}
-
-/* Selo de texto "Codex" ao lado do nome da conta (fonte do sistema: na Pixelify o "C" parece "O"). */
+/* Selo de texto "ChatGPT" ao lado do nome da conta (fonte do sistema: na Pixelify o "C" parece "O"). */
 .ui-prov {
   display: inline-flex;
   align-items: center;
@@ -1499,6 +1482,36 @@
   gap: 6px;
 }
 
+.ui-session-filters {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--ui-line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.ui-session-filter {
+  flex: 1;
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 7px;
+  border-radius: 5px;
+  color: var(--ui-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ui-session-filter:hover {
+  background: var(--ui-bg-hover);
+}
+
+.ui-session-filter[aria-pressed='true'] {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+  box-shadow: inset 0 0 0 1px rgba(124, 200, 255, 0.3);
+}
+
 .ui-acc-filter {
   display: inline-flex;
   align-items: center;
@@ -1702,6 +1715,18 @@
   gap: 6px;
   min-width: 0;
 }
+
+.ui-agent__state {
+  margin: 2px 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ui-muted);
+}
+
+.ui-agent__state.is-working { color: var(--st-working); }
+.ui-agent__state.is-waiting { color: var(--st-waiting); }
+.ui-agent__state.is-shell { color: var(--st-shell); }
+.ui-agent__state.is-done { color: var(--st-done); }
 
 .ui-agent__name {
   flex: 0 0 auto;

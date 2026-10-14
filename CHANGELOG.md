@@ -1,7 +1,7 @@
 # Novidades
 
-O que entrou em cada versão do Habblaud. Cada versão tem a sua seção aqui, e o texto dela vira as notas da
-[release no GitHub](https://github.com/marmottajr/habblaud/releases) (`npm run release`), que o Habblaud abre em
+O que entrou em cada versão do Dissero. Cada versão tem a sua seção aqui, e o texto dela vira as notas da
+[release no GitHub](https://github.com/brunoflma/disserohub/releases) (`npm run release`), que o Dissero abre em
 **Configurações › Sobre › Ver o que mudou**.
 
 O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e os números seguem o
@@ -9,6 +9,21 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 do meio (0.**3**.0).
 
 ## [Não lançado]
+
+## [0.11.1] - 2026-10-14
+
+Primeira distribuição pública do DisseroHub, baseada no Habblaud v0.11.0. Os registros das versões anteriores abaixo pertencem ao projeto original.
+
+### Adicionado
+
+- Identidade visual do Dissero, interface em português, escritório jurídico e áreas comuns refinadas.
+- Painéis adaptáveis, filtros de atividade, navegação e registro de projetos, enquadramento persistente e melhorias de legibilidade.
+- Integrações locais com Claude Code e Codex, inventário de subagentes, perguntas e preservação da presença após ociosidade.
+- Canal próprio de versões: a consulta de atualizações usa somente `brunoflma/disserohub`. A publicação exige CI aprovada no commit exato e recusa a origem do Habblaud.
+
+### Atualização
+
+O botão **Verificar agora** apenas consulta as versões do DisseroHub. A atualização é administrada: preserve os dados locais e qualquer alteração de código, selecione a tag desta release e siga o README. Nunca substitua esta instalação pelo pacote oficial do Habblaud. O plugin hospedado do Dissero possui distribuição independente.
 
 ## [0.11.0] - 2026-10-13
 

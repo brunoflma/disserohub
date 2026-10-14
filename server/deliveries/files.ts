@@ -93,7 +93,7 @@ export function tempRoots(): string[] {
 /**
  * O arquivo (caminho real) está numa pasta que o auxiliar do host pode ler: uma pasta de projeto que alguma conta do
  * Claude Code conhece (ela, ou uma acima dela, tem <conta>/projects/<pasta codificada>) ou uma das `roots` (pastas
- * temporárias, anexos do Habblaud). Assim um pedido vindo do container não alcança o resto do computador.
+ * temporárias, anexos do Dissero). Assim um pedido vindo do container não alcança o resto do computador.
  */
 export function insideKnownFolder(
   path: string,

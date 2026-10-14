@@ -1,0 +1,57 @@
+/* Local workspace refinements. Loaded after the upstream stylesheet. */
+.ui-resizer { position: absolute; z-index: 8; touch-action: none; outline-offset: -2px; }
+.ui-resizer--sidebarWidth { top: 48px; bottom: 12px; right: -3px; width: 8px; cursor: ew-resize; }
+.ui-resizer--drawerWidth { top: 48px; bottom: 12px; left: -3px; width: 8px; cursor: ew-resize; }
+.ui-resizer--feedHeight { left: 12px; right: 12px; top: -3px; height: 8px; cursor: ns-resize; }
+.ui-resizer:hover, .ui-resizer:focus-visible, .ui-resizer.is-dragging { background: #74b7d65c; border-radius: 3px; }
+.ui-root:not(.has-feed) .ui-resizer--feedHeight { display: none; }
+.ui-root.is-narrow .ui-resizer, .is-workspace-compact .ui-resizer--sidebarWidth, .is-workspace-compact .ui-resizer--drawerWidth { display: none; }
+.is-workspace-compact .ui-side__head { padding-left: 10px; padding-right: 10px; }
+.is-workspace-compact .ui-room__path, .is-workspace-compact .ui-acc-filter__name { display: none; }
+.is-workspace-compact .ui-agent__title { max-height: 2.8em; overflow: hidden; }
+.ui-camera-tools { position: absolute; top: calc(var(--top-h, 64px) + 8px); left: 12px; z-index: 18; display: flex; flex-wrap: nowrap; align-items: center; gap: 2px 8px; max-width: calc(100vw - 24px); overflow-x: auto; padding: 4px; background: #111821e8; border: 1px solid #52627366; border-radius: 7px; box-shadow: 0 3px 12px #0003; }
+.has-sidebar:not(.is-narrow) .ui-camera-tools { left: calc(var(--side-w) + var(--gap, 10px) * 2); }
+.has-sidebar:not(.is-narrow) .ui-camera-tools { max-width: calc(100vw - var(--side-w) - 30px); }
+.has-drawer:not(.is-narrow) .ui-camera-tools { max-width: calc(100vw - var(--drawer-w) - 30px); }
+.has-sidebar.has-drawer:not(.is-narrow) .ui-camera-tools { max-width: calc(100vw - var(--side-w) - var(--drawer-w) - 40px); }
+.ui-camera-presets, .ui-camera-pages { display: flex; align-items: center; }
+.ui-camera-presets { flex: none; flex-wrap: nowrap; }
+.ui-camera-pages { gap: 4px; flex: none; min-width: 0; }
+.ui-camera-picker { flex: none; width: clamp(160px, var(--camera-name-width, 180px), 260px); min-width: 0; max-width: 100%; border: 1px solid #ffffff20; border-radius: 5px; background: #18232d; color: #d2dfeb; padding: 6px 8px; font: inherit; font-size: 12px; }
+.ui-camera-pages > button, .ui-camera-position { flex: none; }
+.ui-camera-tools { gap: 5px 10px; padding: 6px; }
+.ui-line-icon { shape-rendering: geometricPrecision; }
+.ui-icon-btn .ui-line-icon { width: 20px; height: 20px; }
+.ui-icon-btn--sm .ui-line-icon, .ui-btn .ui-line-icon { width: 16px; height: 16px; }
+.ui-camera-position { min-width: 28px; text-align: center; font-size: 10px; color: #9eafbd; }
+.ui-camera-preset:disabled { cursor: default; opacity: .4; }
+.ui-camera-preset { border: 0; border-radius: 4px; padding: 6px 9px; background: transparent; color: #d2dfeb; font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.ui-camera-preset:hover, .ui-camera-preset:focus-visible { background: #304452; color: #fff; }
+.ui-camera-preset--reset { color: #9eafbd; }
+.ui-feed__controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid #ffffff0b; }
+.ui-feed__mode { display: inline-flex; gap: 2px; }
+.ui-feed__mode button, .ui-feed__controls button { border: 1px solid #ffffff18; border-radius: 4px; background: #111821; padding: 4px 8px; color: #b8c8d7; font: inherit; font-size: 11px; cursor: pointer; }
+.ui-feed__mode button[aria-pressed="true"], .ui-feed__controls button[aria-pressed="true"] { background: #294253; color: #e4f4ff; border-color: #74b7d688; }
+.ui-feed__scope { min-width: 100px; max-width: 180px; border: 1px solid #ffffff24; border-radius: 4px; background: #111821; color: #d3e0ed; padding: 4px; font: inherit; font-size: 11px; }
+.ui-feed__repeat { color: #a9c4d8; font-size: 10px; margin-left: 4px; }
+.ui-feed__row { grid-template-columns: 48px 20px 70px 16px minmax(0, 95px) 18px minmax(0, 1fr) auto; padding-right: 28px; }
+.ui-feed__item { position: relative; }
+.ui-feed__details > summary { position: absolute; right: 4px; top: 2px; width: 22px; height: 22px; list-style: none; cursor: pointer; color: #b6c7d9; text-align: center; }
+.ui-feed__details > summary::-webkit-details-marker { display: none; }
+.ui-feed__details[open] > summary { color: #8ac8ea; }
+.ui-feed__raw { max-height: 150px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 3px 6px 8px; padding: 8px; background: #0c121bd9; border: 1px solid #ffffff14; border-radius: 4px; font-size: 10px; line-height: 1.5; }
+.ui-root:not(.has-feed) .ui-feed__controls { display: none; }
+.ui-work-objective { margin: 0 0 12px; padding: 9px 11px; border-left: 2px solid #72c9ac; background: #72c9ac0b; border-radius: 0 4px 4px 0; color: #e0ece8; font-size: 12px; line-height: 1.5; }
+.ui-work-objective__label { display: block; color: #9fb9b0; font-size: 10px; margin-bottom: 3px; }
+.ui-work-social { border-top: 1px solid #ffffff12; margin-top: 10px; }
+.ui-work-social > summary { cursor: pointer; padding: 12px 0; color: #a6b5c7; font-size: 12px; }
+.ui-root :is(button, select, input, summary, [role="separator"]):focus-visible { outline: 2px solid #8ac8ea; outline-offset: 2px; }
+.ui-root .ui-muted, .ui-root .ui-small { color: #aab6c9; }
+@media (max-width: 600px) {
+  .ui-camera-tools { max-width: calc(100vw - 24px); }
+  .ui-camera-preset { padding: 6px 7px; font-size: 10px; }
+  .ui-work-objective { font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-camera-tools, .ui-resizer, .ui-feed__row, .ui-subs { transition: none !important; animation: none !important; }
+}

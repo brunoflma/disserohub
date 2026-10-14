@@ -34,6 +34,8 @@ import { normalizeCwd, roomDisplayNames, SlotAllocator } from './rooms';
 import { tr } from '../../shared/i18n';
 
 export const OFFLINE_GRACE_MS = 20_000;
+/** Sessão aberta sem trabalho recente: sai do escritório, mas continua sendo observada. */
+export const IDLE_PRESENCE_MS = 15 * 60_000;
 export const DONE_GRACE_MS = 25_000;
 export const SLOT_COOLDOWN_MS = 30_000;
 export const NOTICE_DEDUPE_MS = 10_000;
@@ -103,6 +105,8 @@ export interface MainInput {
   role: string;
   startedAt: number;
   status: AgentStatus;
+  /** Início real do estado, recuperado pela fonte; não é o horário do boot do servidor. */
+  statusSince?: number;
   waitingFor?: string;
 }
 
@@ -120,6 +124,10 @@ interface AgentRecord {
   info: AgentInfo;
   history: Activity[];
   removeAt?: number;
+  /** Fora da lista e do cenário por ociosidade, sem encerrar a sessão nem apagar o histórico. */
+  parked?: boolean;
+  /** Prazo de permanência após uma pausa observada; metadados não o reiniciam nem o antecipam. */
+  idleSince?: number;
   /** Início do turno atual (para "Concluiu em X"). */
   turnStart?: number;
   /** Atividade "Concluiu" sintetizada pela mudança de status (substituída pela do transcript, se vier). */
@@ -194,6 +202,7 @@ const byStart = (a: ShellJob, b: ShellJob) => a.startedAt - b.startedAt || a.id.
 export class Office {
   private agents = new Map<string, AgentRecord>();
   private rooms = new Map<string, { path: string; createdAt: number }>();
+  private registeredRooms = new Set<string>();
   private slots = new SlotAllocator(SLOT_COOLDOWN_MS);
   private roomNames = new Map<string, string>();
   private feed: FeedItem[] = [];
@@ -339,7 +348,7 @@ export class Office {
       tasks: [],
       startedAt: p.startedAt,
       lastEventAt: p.startedAt,
-      statusSince: now,
+      statusSince: Math.min(p.statusSince ?? now, now),
       stats: zeroStats(),
       seed: chosen?.seed ?? hash32(p.id),
     };
@@ -350,6 +359,7 @@ export class Office {
     }
     if (p.status === 'waiting') info.waitingFor = p.waitingFor ?? tr('responder no terminal');
     const rec: AgentRecord = { info, history: [] };
+    if (p.status === 'idle') rec.idleSince = info.statusSince;
     if (p.status === 'working') rec.turnStart = now;
     this.agents.set(p.id, rec);
     const acc = this.deps.accountName(p.account);
@@ -378,6 +388,17 @@ export class Office {
     this.markDirty();
   }
 
+  /** Perguntas pendentes de uma fonte, para leitura no painel; a resposta continua no aplicativo de origem. */
+  setPendingQuestions(id: string, questions: Activity[]): void {
+    const info = this.agents.get(id)?.info;
+    if (!info) return;
+    const previous = info.pendingQuestions ?? [];
+    if (previous.length === questions.length && previous.every((q, i) => q === questions[i])) return;
+    if (questions.length) info.pendingQuestions = questions;
+    else delete info.pendingQuestions;
+    this.markDirty();
+  }
+
   setStatus(id: string, status: AgentStatus, waitingFor?: string): void {
     const rec = this.agents.get(id);
     if (!rec) return;
@@ -389,6 +410,8 @@ export class Office {
     if (prev !== status) {
       info.status = status;
       info.statusSince = now;
+      if (status === 'idle') rec.idleSince = now;
+      else delete rec.idleSince;
     }
     if (reason) info.waitingFor = reason;
     else delete info.waitingFor;
@@ -931,10 +954,12 @@ export class Office {
       this.recomputeRoomNames();
       this.markDirty();
     }
+    this.refreshPresence(now);
   }
 
   /** Fecha uma revisão: devolve o snapshot (novo, se algo mudou), o feed e os avisos pendentes. */
   commit(): CommitResult {
+    this.refreshPresence(this.now());
     const feed = this.pendingFeed;
     const notices = this.pendingNotices;
     this.pendingFeed = [];
@@ -948,9 +973,43 @@ export class Office {
 
   // ---------------------------------------------------------------- internos
 
+  /** Locks, PIDs e releituras sem eventos novos não renovam a presença no escritório. */
+  private refreshPresence(now: number): void {
+    const perms = this.deps.permissions?.();
+    const presentParents = new Set<string>();
+    for (const rec of this.agents.values()) {
+      const info = rec.info;
+      // Até a animação de entrega acabar, todo subagente visível precisa do principal presente.
+      if (info.kind !== 'sub' || (rec.removeAt !== undefined && now >= rec.removeAt)) continue;
+      let parent = info.parentId;
+      while (parent && !presentParents.has(parent)) {
+        presentParents.add(parent);
+        parent = this.agents.get(parent)?.info.parentId;
+      }
+    }
+    let changed = false;
+    for (const rec of this.agents.values()) {
+      const info = rec.info;
+      const resting = info.kind === 'main' && info.status === 'idle' && rec.removeAt === undefined
+        && !perms?.has(info.id) && !presentParents.has(info.id);
+      // Quando o último subagente/pedido termina, começa um prazo inteiro para o principal descansar.
+      if (resting) rec.idleSince ??= now;
+      else delete rec.idleSince;
+      const parked = (rec.parked === true && info.status === 'offline')
+        || (resting && now - rec.idleSince! >= IDLE_PRESENCE_MS);
+      if (!!rec.parked === parked) continue;
+      rec.parked = parked;
+      changed = true;
+    }
+    if (changed) this.markDirty();
+  }
+
   private build(): OfficeSnapshot {
     const now = this.now();
-    const entries = new Map(this.rooms);
+    const perms = this.deps.permissions?.();
+    const real = [...this.agents.values()].filter((r) => !r.parked).map((r) => applyPermission(cloneAgent(r.info), perms?.get(r.info.id)));
+    const occupied = new Set(real.map((a) => a.roomId));
+    const entries = new Map([...this.rooms].filter(([id]) => occupied.has(id) || this.registeredRooms.has(id)));
     for (const r of this.demoSnap?.rooms ?? []) entries.set(r.id, { path: r.path, createdAt: r.createdAt });
     this.slots.sync(entries.keys(), now);
     const rooms: RoomInfo[] = [...entries]
@@ -961,6 +1020,7 @@ export class Office {
         slot: this.slots.slotOf(id) ?? 0,
         seed: hash32(id),
         createdAt: r.createdAt,
+        ...(this.registeredRooms.has(id) ? { registered: true } : {}),
       }))
       .sort((a, b) => a.slot - b.slot);
     // festa/alarme (eventos do GitHub): das salas reais ou do demo
@@ -968,8 +1028,6 @@ export class Office {
       const effect = this.effects.get(room.id, now) ?? this.demoSnap?.rooms.find((r) => r.id === room.id)?.effect;
       if (effect) room.effect = { ...effect };
     }
-    const perms = this.deps.permissions?.();
-    const real = [...this.agents.values()].map((r) => applyPermission(cloneAgent(r.info), perms?.get(r.info.id)));
     const reach = this.deps.messages?.();
     // Mensagens pelo escritório: principais presentes cuja sessão está com o plugin conectado. No demo quem decide é
     // o simulador; com o recurso desligado, ninguém recebe.
@@ -1055,6 +1113,15 @@ export class Office {
   refreshRoomNames(): void {
     this.recomputeRoomNames();
     this.markDirty();
+  }
+
+  /** Pasta escolhida pelo usuário: mantém uma sala disponível entre as sessões. */
+  registerProject(path: string, createdAt = this.now()): string {
+    const id = normalizeCwd(path);
+    this.ensureRoom(id, createdAt);
+    this.registeredRooms.add(id);
+    this.markDirty();
+    return id;
   }
 
   private pushFeed(items: FeedItem[]): void {

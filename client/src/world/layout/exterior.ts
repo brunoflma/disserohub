@@ -22,6 +22,8 @@ export interface ExteriorLayout {
 /** Fechamento do corredor e pátio de um slot sem sala. */
 export interface SlotShell {
   slot: number;
+  /** Reserved indoor space receives interior light rather than the outdoor tint. */
+  interior?: boolean;
   rect: TileRect;
   walls: WallSegment[];
   windows: WallItemPlacement[];

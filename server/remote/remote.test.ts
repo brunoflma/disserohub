@@ -90,7 +90,7 @@ describe('setup e anúncio', () => {
     expect(isValidDomain('10.0.0.1')).toBe(false);
     expect(mdnsCommand('darwin', 'myclaude', '192.168.1.10', 443)).toEqual({
       cmd: 'dns-sd',
-      args: ['-P', 'Habblaud (myclaude)', '_https._tcp', 'local', '443', 'myclaude.local', '192.168.1.10'],
+      args: ['-P', 'Dissero (myclaude)', '_https._tcp', 'local', '443', 'myclaude.local', '192.168.1.10'],
     });
     expect(mdnsCommand('linux', 'myclaude', '192.168.1.10', 443)).toEqual({ cmd: 'avahi-publish', args: ['-a', '-R', 'myclaude.local', '192.168.1.10'] });
     expect(mdnsCommand('win32', 'myclaude', '192.168.1.10', 443)).toBeUndefined();
@@ -232,7 +232,7 @@ describe.skipIf(!HAS_OPENSSL)('certificados (openssl)', () => {
       req.end();
     });
     expect(redirect).toEqual({ status: 308, location: `https://myclaude.local:${port}/x?y=1` });
-    // Nome que o Habblaud não conhece não vira redirecionamento (nada de mandar o navegador para outro lugar).
+    // Nome que o Dissero não conhece não vira redirecionamento (nada de mandar o navegador para outro lugar).
     const foreign = await new Promise<number>((ok, fail) => {
       const req = http.request({ host: '127.0.0.1', port, path: '/', headers: { Host: 'evil.example' } }, (res) => {
         res.resume();

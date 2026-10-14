@@ -89,6 +89,7 @@ export interface FreeAreaPanels {
   sidebar: HTMLElement;
   drawer: HTMLElement;
   feed: HTMLElement;
+  toolbar?: HTMLElement;
 }
 
 /** `follow: 'option'` segue a opção "seguir selecionado" do momento; `true` = duplo clique (sempre segue). */
@@ -348,7 +349,7 @@ export class FreeArea {
     return {
       vw,
       vh,
-      topBottom: topbar.offsetTop + topbar.offsetHeight,
+      topBottom: Math.max(topbar.offsetTop + topbar.offsetHeight, this.panels.toolbar ? this.panels.toolbar.offsetTop + this.panels.toolbar.offsetHeight : 0),
       sideRight: sidebar.offsetLeft + sidebar.offsetWidth,
       drawerLeft: drawer.offsetLeft,
       drawerTop: drawer.offsetTop,

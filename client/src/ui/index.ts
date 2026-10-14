@@ -1,4 +1,4 @@
-// Interface do Habblaud (painéis DOM sobre o canvas do escritório).
+// Interface do Dissero (painéis DOM sobre o canvas do escritório).
 // Recebe o OfficeStore (dados) e o WorldApi (canvas) e monta: barra superior com uso por conta,
 // barra lateral, gaveta de detalhes, feed, avisos, configurações, ajuda e estados de carregamento/vazio.
 // DOM incremental: os snapshots (até ~5/s) só marcam a UI como "suja"; tudo é reconciliado uma vez por quadro.
@@ -8,6 +8,12 @@ import '@fontsource/pixelify-sans/500.css';
 import '@fontsource/pixelify-sans/600.css';
 import '@fontsource/pixelify-sans/700.css';
 import './styles.css';
+import '../local/workspace.css';
+import '../local/readability.css';
+import { installReadableTypography } from '../local/readable-typography';
+import { workspaceLayout, type PanelDimensions } from '../local/workspace-layout';
+import { panelResizer } from '../local/panel-resizer';
+import { CameraTools } from '../local/camera-tools';
 
 import type { OfficeStore } from '../net/store';
 import type { Selection, WorldApi } from '../world/api';
@@ -18,6 +24,7 @@ import { h } from './dom';
 import { Drawer } from './drawer';
 import { FeedPanel } from './feed';
 import { HelpDialog } from './help';
+import { ProjectDialog } from './projects';
 import { HistoryPopover } from './history';
 import { Deliveries } from './deliveries';
 import { HoverTip } from './hovertip';
@@ -52,6 +59,7 @@ function isTypingTarget(t: EventTarget | null): boolean {
 }
 
 export function createUI(root: HTMLElement, store: OfficeStore, world: WorldApi): void {
+  installReadableTypography();
   const storage = safeLocalStorage();
   let prefs: UiPrefs = loadPrefs(storage);
   let selection: Selection = world.getSelection();
@@ -69,10 +77,15 @@ export function createUI(root: HTMLElement, store: OfficeStore, world: WorldApi)
   let drawer: Drawer;
   let settings: SettingsPopover;
   let help: HelpDialog;
+  let projects: ProjectDialog;
   let area: FreeArea;
   let timelapse: TimelapsePlayer;
   /** A seleção em curso partiu da UI (lista, feed, aviso...), não de um clique no canvas. */
   let uiSelecting = false;
+  let feedOverride = false;
+  let draftDimensions: Partial<PanelDimensions> = {};
+  const dimensions = () => workspaceLayout(innerWidth, innerHeight, { ...prefs, ...draftDimensions }, { sidebar: panels.sidebar, drawer: !!selection && !drawer?.floating, narrow: !!narrowMq?.matches });
+  const effectiveFeed = () => panels.feed && (!dimensions().foldFeed || feedOverride);
 
   const ctx: UiContext = {
     store,
@@ -85,6 +98,7 @@ export function createUI(root: HTMLElement, store: OfficeStore, world: WorldApi)
       prefs = { ...prefs, ...patch };
       savePrefs(storage, prefs);
       world.setOptions(worldOptionsFrom(prefs));
+      if (area) applyLayout();
       invalidate();
     },
     now: () => timelapse?.replayTime ?? Date.now() + skew,
@@ -96,6 +110,7 @@ export function createUI(root: HTMLElement, store: OfficeStore, world: WorldApi)
       else area.clearIntent();
       // A gaveta passa a contar na área livre ANTES do foco: o mundo centraliza já na parte visível.
       const prev = selection;
+      if (prev?.id !== sel?.id || prev?.type !== sel?.type) feedOverride = false;
       selection = sel;
       area.selectingFromUi();
       applyLayout({ refocus: false });
@@ -116,18 +131,26 @@ export function createUI(root: HTMLElement, store: OfficeStore, world: WorldApi)
     camera(action) {
       area.clearIntent();
       if (action === 'overview') world.overview();
+      else if (action === 'offices' || action === 'reset') {
+        if (action === 'reset') ctx.updatePrefs({ cameraView: null });
+        world.offices?.();
+      } else if (action === 'follow') {
+        if (selection?.type === 'agent') drawer.toggleFollow();
+        else ctx.announce(tr('Selecione um agente para seguir.'));
+      }
       else world.zoomBy(action === 'zoomIn' ? 1.25 : 1 / 1.25);
     },
     invalidate: () => invalidate(),
     togglePanel(name, open) {
-      const next = open ?? !panels[name];
-      if (panels[name] === next) return;
+      const next = open ?? !ctx.isPanelOpen(name);
+      if (name === 'feed') feedOverride = next;
+      if (panels[name] === next && name !== 'feed') return;
       panels[name] = next;
       if (!ctx.isNarrow()) ctx.updatePrefs(name === 'sidebar' ? { sidebarOpen: next } : { feedOpen: next });
       applyLayout();
       invalidate();
     },
-    isPanelOpen: (name) => panels[name],
+    isPanelOpen: (name) => name === 'feed' ? effectiveFeed() : panels[name],
     isNarrow: () => !!narrowMq?.matches,
     announce(text) {
       live.textContent = '';
@@ -138,6 +161,7 @@ export function createUI(root: HTMLElement, store: OfficeStore, world: WorldApi)
       requestAnimationFrame(() => sidebar.focusSearch());
     },
     openHelp: (section) => help.open(section),
+    openProject: (opener) => projects.open(opener),
     toggleSettings: () => settings.toggle(topbar.settingsBtn),
     openAbout: () => settings.showAbout(topbar.settingsBtn),
     toggleTimelapse() {
@@ -153,6 +177,8 @@ export function createUI(root: HTMLElement, store: OfficeStore, world: WorldApi)
   const notifier = new Notifier(ctx, sound.board);
   topbar = new TopBar(ctx);
   sidebar = new Sidebar(ctx);
+  projects = new ProjectDialog(ctx, () => sidebar.showProjects());
+  root.append(projects.el);
   // Terminal interativo (Claude Code de verdade, dentro do navegador): abrir, assumir e encerrar sessões.
   const pty = new PtyPanel(ctx);
   const terminal = new TerminalPanel(ctx, pty);
@@ -234,15 +260,36 @@ export function createUI(root: HTMLElement, store: OfficeStore, world: WorldApi)
 
   root.classList.add('ui-root');
   root.append(timelapse.vignette, topbar.el, sidebar.el, scrim, feed.el, drawer.el, terminal.el, pty.el, timelapse.el, timelapse.badge, toasts.el, banner.el, update.el, empty.el, tip.el, settings.el, history.el, deliveries.el, help.el, renamer.el, live, splash.el);
-  area = new FreeArea(world, { root, topbar: topbar.el, sidebar: sidebar.el, drawer: drawer.el, feed: feed.el }, () => ({
+  const areaPanels = { root, topbar: topbar.el, sidebar: sidebar.el, drawer: drawer.el, feed: feed.el, toolbar: undefined as HTMLElement | undefined };
+  area = new FreeArea(world, areaPanels, () => ({
     sidebar: panels.sidebar,
-    feed: panels.feed,
+    feed: effectiveFeed(),
     drawer: selection !== null && !drawer.floating,
     narrow: ctx.isNarrow(),
   }));
   drawer.onLayoutChange = () => applyLayout();
 
-  const components: UiComponent[] = [topbar, sidebar, drawer, terminal, pty, history, deliveries, feed, toasts, settings, empty, banner, tip, notifier, splash, timelapse, sound, day, updateToaster];
+  const resizers = ([['sidebarWidth', sidebar.el], ['drawerWidth', drawer.el], ['feedHeight', feed.el]] as const).map(([key, el]) => panelResizer(el, key, () => prefs[key], (value, save) => {
+    if (value === null || save) {
+      draftDimensions = {};
+      if (save && value !== null) ctx.updatePrefs({ [key]: value });
+    } else draftDimensions = { [key]: value };
+    applyLayout();
+    invalidate();
+  }));
+  const cameraTools = new CameraTools(ctx);
+  root.append(cameraTools.el);
+  areaPanels.toolbar = cameraTools.el;
+  if (typeof ResizeObserver === 'function') new ResizeObserver(() => { applyLayout(); invalidate(); }).observe(cameraTools.el);
+  world.onCameraChange?.((state) => {
+    if (!store.replaying) {
+      prefs = { ...prefs, cameraView: state };
+      savePrefs(storage, prefs);
+    }
+  });
+  if (prefs.cameraView) world.restoreCamera?.(prefs.cameraView);
+
+  const components: UiComponent[] = [topbar, sidebar, drawer, terminal, pty, history, deliveries, feed, cameraTools, toasts, settings, empty, banner, tip, notifier, splash, timelapse, sound, day, updateToaster];
 
   // ---------------------------------------------------------------- renderização agrupada por quadro
   let rafId = 0;
@@ -274,11 +321,17 @@ export function createUI(root: HTMLElement, store: OfficeStore, world: WorldApi)
 
   /** Aplica as classes de layout e informa ao mundo a área livre (sem esperar as transições dos painéis). */
   function applyLayout(opts: { refocus?: boolean } = {}): void {
+    const size = dimensions();
+    root.style.setProperty('--side-w', `${size.sidebar}px`);
+    root.style.setProperty('--drawer-w', `${size.drawer}px`);
+    root.style.setProperty('--feed-h', `${size.feed}px`);
+    root.classList.toggle('is-workspace-compact', size.compact);
     root.classList.toggle('has-sidebar', panels.sidebar);
-    root.classList.toggle('has-feed', panels.feed);
+    root.classList.toggle('has-feed', effectiveFeed());
     root.classList.toggle('has-drawer', selection !== null && !drawer.floating);
     root.classList.toggle('is-narrow', ctx.isNarrow());
     area.sync(opts);
+    resizers?.forEach((sync) => sync());
   }
 
   // ---------------------------------------------------------------- eventos
@@ -292,6 +345,7 @@ export function createUI(root: HTMLElement, store: OfficeStore, world: WorldApi)
   onAccessChange(() => invalidate());
   world.onSelect((sel) => {
     const prev = selection;
+    if (prev?.id !== sel?.id || prev?.type !== sel?.type) feedOverride = false;
     selection = sel;
     // Clique no canvas (ou agente que saiu): a gaveta espera a janela do duplo clique antes de mexer na câmera.
     if (!uiSelecting) area.selectionChangedExternally(prev, sel);
@@ -309,6 +363,7 @@ export function createUI(root: HTMLElement, store: OfficeStore, world: WorldApi)
     applyLayout();
     invalidate();
   });
+  addEventListener('resize', () => { applyLayout(); invalidate(); });
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) invalidate();
   });
@@ -325,7 +380,7 @@ export function createUI(root: HTMLElement, store: OfficeStore, world: WorldApi)
   function onKey(e: KeyboardEvent): void {
     if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === 'Escape') {
-      if (help.isOpen || settings.isOpen || history.isOpen) return; // diálogo/popover tratam o próprio Esc
+      if (help.isOpen || projects.isOpen || settings.isOpen || history.isOpen) return; // diálogo/popover tratam o próprio Esc
       // O terminal flutua sobre tudo: fecha primeiro (a busca dele, depois ele; a gaveta continua aberta).
       if (terminal.isOpen) {
         terminal.escape();

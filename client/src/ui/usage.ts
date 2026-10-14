@@ -3,7 +3,7 @@
 // - número velho nunca passa por atual: janela que já renovou depois da leitura mostra "—" e "renovada";
 //   números antigos ficam acinzentados com a idade ("há 6 d") no cabeçalho ou, no celular, um selo no chip;
 // - o reinício vem com verbo implícito no ícone ↻ e contagem regressiva quando falta menos de um dia;
-// - conta sem números diz "sem dados de uso" e oferece "Como ativar" (mod do Habblaud, recomendado).
+// - conta sem números diz "sem dados de uso" e oferece "Como ativar" (mod do Dissero, recomendado).
 // Conta do Codex: os números vêm dos arquivos de sessão dele, que só se renovam enquanto alguma sessão roda; por isso
 // a idade ("há 12 min") fica sempre à mostra. Sem cota nem créditos ("sem cota") nunca vira 0%. Não há o que
 // instalar para o uso: "Como funciona" abre a ajuda na seção do Codex. Sem Opus/Sonnet nem e-mail (só o plano).
@@ -12,7 +12,7 @@ import type { UiContext } from './context';
 import { h, KeyedList, setAttr, setHidden, setStyleVar, setText, setTitle, setVariant } from './dom';
 import { FIVE_HOURS_MS, relativeTime, usageLevel, usageWindowView, WEEK_MS, type UsageWindowView } from './format';
 import { ICONS } from './icons';
-import { isCodex } from './provider';
+import { isCodex, showsProviderTag } from './provider';
 import { usageRowFits } from './usage-row';
 import { createAccountChip, createProviderTag, updateAccountChip, updateProviderTag } from './widgets';
 import { tr } from '../../../shared/i18n';
@@ -23,9 +23,9 @@ export const SOURCE_LABEL: Record<NonNullable<AccountInfo['usage']>['source'], s
   codex: tr('arquivos do Codex'),
 };
 
-/** Origem para mostrar: o arquivo ao vivo pode ter sido gravado pelo mod do Habblaud ou pelo tap. */
+/** Origem para mostrar: o arquivo ao vivo pode ter sido gravado pelo mod do Dissero ou pelo tap. */
 export function sourceLabel(u: NonNullable<AccountInfo['usage']>): string {
-  if (u.source === 'statusline' && u.via === 'mod') return tr('ao vivo (mod do Habblaud)');
+  if (u.source === 'statusline' && u.via === 'mod') return tr('ao vivo (mod do Dissero)');
   return SOURCE_LABEL[u.source] ?? u.source;
 }
 
@@ -36,7 +36,7 @@ export function sourceLabel(u: NonNullable<AccountInfo['usage']>): string {
 export const USAGE_SETUP_STEPS: readonly [string, string][] = [
   [
     'npm run mod:install',
-    tr('Recomendado: instala o mod do Habblaud no Claude Code (2.1.287 ou mais novo), que passa o uso de 5 h e da semana ao vivo. Rode na pasta do Habblaud, no computador onde o Claude Code roda; nas sessões já abertas, `/reload-plugins`.'),
+    tr('Recomendado: instala o mod do Dissero no Claude Code (2.1.287 ou mais novo), que passa o uso de 5 h e da semana ao vivo. Rode na pasta do Dissero, no computador onde o Claude Code roda; nas sessões já abertas, `/reload-plugins`.'),
   ],
   [
     'npm run usage:install',
@@ -177,7 +177,7 @@ export function showsUsageAge(a: Pick<AccountInfo, 'usage' | 'usageStatus' | 'pr
 /** Linha embaixo do nome: e-mail; no Codex (sem e-mail), o plano; nas outras, a pasta. */
 export function usageSubtitle(a: Pick<AccountInfo, 'email' | 'plan' | 'configDir' | 'provider'>): string {
   if (a.email) return a.email;
-  if (isCodex(a)) return a.plan ? tr('plano {0}', [a.plan]) : 'Codex';
+  if (isCodex(a)) return a.plan ? tr('plano {0}', [a.plan]) : 'ChatGPT';
   return a.configDir;
 }
 
@@ -207,7 +207,14 @@ export class UsageCards {
   private refs = new WeakMap<HTMLElement, CardRefs>();
 
   constructor(private ctx: UiContext) {
-    this.el = h('div', { class: 'ui-usage', role: 'group', attrs: { 'aria-label': tr('Uso por conta') } });
+    this.el = h('div', { class: 'ui-usage', role: 'group', attrs: { 'aria-label': tr('Uso por conta'), tabindex: '0' } });
+    this.el.addEventListener('keydown', (e) => {
+      const direction = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+      if (!direction || this.el.scrollWidth <= this.el.clientWidth) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.el.scrollBy({ left: direction * Math.max(240, this.el.clientWidth * .75), behavior: 'auto' });
+    });
     this.list = new KeyedList<AccountInfo>(this.el, {
       key: (a) => a.id,
       create: () => this.createCard(),
@@ -342,7 +349,7 @@ export class UsageCards {
     setText(r.name, a.name);
     updateProviderTag(r.prov, codex ? 'codex' : 'claude', a.name);
     setText(r.email, usageSubtitle(a));
-    setAttr(card, 'aria-label', tr('{0}{1}: uso do plano', [a.name, codex ? ' (Codex)' : '']));
+    setAttr(card, 'aria-label', tr('{0}{1}: uso do plano', [a.name, showsProviderTag(codex ? 'codex' : 'claude', a.name) ? ' (ChatGPT)' : '']));
 
     const usage = a.usage;
     const state = cardState(a);
@@ -387,15 +394,15 @@ export class UsageCards {
     setText(r.howLong, codex ? tr('Como funciona') : tr('Como ativar'));
     setText(r.howShort, codex ? tr('Saber') : tr('Ativar'));
     r.how.dataset.help = codex ? 'codex' : 'usage';
-    setTitle(r.how, codex ? tr('Como o uso do Codex chega ao Habblaud (abre a ajuda em “Codex”)') : tr('Como mostrar o uso desta conta (abre a ajuda em “Contas e uso”)'));
+    setTitle(r.how, codex ? tr('Como o uso do Codex chega ao Dissero (abre a ajuda em “Codex”)') : tr('Como mostrar o uso desta conta (abre a ajuda em “Contas e uso”)'));
     this.updateTip(r, a, state, five, week, now);
   }
 
   private updateTip(r: CardRefs, a: AccountInfo, state: CardState, five: UsageWindowView | null, week: UsageWindowView | null, now: number): void {
     const codex = isCodex(a);
-    setText(r.tipTitle, `${a.name}${codex && !/codex/i.test(a.name) ? ' · Codex' : ''}${a.plan ? tr(' · plano {0}', [a.plan]) : ''}`);
+    setText(r.tipTitle, `${a.name}${showsProviderTag(codex ? 'codex' : 'claude', a.name) ? ' · ChatGPT' : ''}${a.plan ? tr(' · plano {0}', [a.plan]) : ''}`);
     const rows: [string, string][] = [];
-    if (codex) rows.push([tr('Ferramenta'), 'Codex']);
+    if (codex) rows.push([tr('Ferramenta'), 'ChatGPT']);
     if (a.email) rows.push(['E-mail', a.email]);
     if (a.organization) rows.push([tr('Organização'), a.organization]);
     if (a.plan) rows.push([tr('Plano'), a.plan]);

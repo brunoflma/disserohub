@@ -1,12 +1,13 @@
-// Desenho do mundo por frame: camada externa -> pisos -> paredes/itens de parede -> entidades
+// Desenho do mundo por frame: base interna -> pisos -> paredes/itens de parede -> entidades
 // ordenadas por profundidade -> luz/escuridão -> ícones. A passada em espaço de tela (texto
 // nítido) fica em overlay.ts.
 import { TILE, type ArtModule, type CharacterFrameRequest, type IconName, type ScreenMode, type Sprite } from '../../art/api';
 import type { SeasonalTheme, WorldOptions } from '../api';
 import type { WorldAssets } from '../assets';
 import type { Camera } from '../camera';
-import { BUILDING_H, COL_W, CORE_COLS, CORRIDOR_Y } from '../constants';
-import { layoutExterior, slotShell, type ExteriorLayout, type SlotShell } from '../layout/exterior';
+import { CORE_COLS } from '../constants';
+import type { ExteriorLayout, SlotShell } from '../layout/exterior';
+import { layoutInterior, interiorSlotShell } from '../layout/interior';
 import { slotAt } from '../layout/geometry';
 import type { ExteriorProp } from '../layout/types';
 import { screenModeFor } from '../sim/behavior';
@@ -71,10 +72,6 @@ const POPCORN_DX: Readonly<Record<string, number>> = { down: 0, up: -9, left: -5
 const POPCORN_DY: Readonly<Record<string, number>> = { down: 11, up: 8, left: 9, right: 9 };
 /** Teia ao lado de um vizinho: no máximo isto (px) para fora do corpo. */
 const WEB_MAX_OUT = 9;
-/** Tom das bordas da área externa (vinheta) e do gramado além dela. */
-const VIGNETTE_ALPHA = 0.2;
-const VIGNETTE_EDGE = `rgba(18,40,26,${VIGNETTE_ALPHA})`;
-
 export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
   readonly areas = new Map<string, AreaVis>();
@@ -113,9 +110,10 @@ export class Renderer {
   assets: WorldAssets | null = null;
   /** Último fator noturno aplicado (usado pelo overlay). */
   night = 0;
-  private clearColor = '#7fae62';
-  private grass: CanvasPattern | null = null;
+  private backdrop: HTMLCanvasElement | null = null;
+  private shellDecor = new Map<number, HTMLCanvasElement>();
   private theme: SeasonalTheme = 'none';
+  private formal = false;
 
   constructor(
     readonly canvas: HTMLCanvasElement,
@@ -124,7 +122,7 @@ export class Renderer {
     private readonly camera: Camera,
   ) {
     this.ctx = canvas.getContext('2d', { alpha: false })!;
-    this.exterior = layoutExterior(sim.building.cols);
+    this.exterior = layoutInterior(sim.building.cols);
     this.lighting = new Lighting(art, sim);
   }
 
@@ -136,7 +134,8 @@ export class Renderer {
   // =================================================================== sincronização com a simulação
 
   /** Mantém caches e visuais coerentes com o prédio atual. */
-  sync(theme: SeasonalTheme = 'none'): void {
+  sync(theme: SeasonalTheme = 'none', formal = false): void {
+    this.formal = formal;
     const sim = this.sim;
     const themeChanged = theme !== this.theme;
     this.theme = theme;
@@ -171,11 +170,11 @@ export class Renderer {
     this.builtAssetsVersion = this.assetsVersion;
   }
 
-  /** Camada base: área externa, pátios dos slots e fechamentos do corredor. */
+  /** Indoor base: only the corridor boundaries of currently vacant room slots. */
   private buildBase(): void {
     const cols = this.sim.building.cols;
     this.baseCols = cols;
-    this.exterior = layoutExterior(cols);
+    this.exterior = layoutInterior(cols);
     const b = this.exterior.bounds;
     this.baseX = b.x * TILE;
     this.baseY = b.y * TILE;
@@ -185,177 +184,118 @@ export class Renderer {
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     ctx.translate(-this.baseX, -this.baseY);
-    paintShell(this.art, ctx, this.exterior.floors, []);
-    // faixas da rua
-    const ly = this.exterior.streetY + Math.round(this.exterior.streetH / 2) - 1;
-    ctx.fillStyle = 'rgba(255,236,170,0.75)';
-    for (let x = this.baseX + 4; x < this.baseX + c.width; x += 24) ctx.fillRect(x, ly, 12, 2);
     this.shells = [];
     this.shellWindows = [];
+    this.shellDecor.clear();
     for (let col = CORE_COLS; col < cols; col++) {
       for (const side of ['north', 'south'] as const) {
-        const sh = slotShell(slotAt(col, side), col === cols - 1);
+        const sh = interiorSlotShell(slotAt(col, side), col === cols - 1);
         this.shells.push(sh);
         paintShell(this.art, ctx, sh.floors, sh.walls);
+        const decor = document.createElement('canvas');
+        decor.width = sh.rect.w * TILE;
+        decor.height = sh.rect.h * TILE;
+        const d = decor.getContext('2d')!;
+        d.imageSmoothingEnabled = false;
+        const x = sh.rect.x * TILE;
+        const y = sh.rect.y * TILE;
+        d.translate(-x, -y);
+        for (const rug of sh.rugs) this.safe(() => this.art.drawRug(d, rug.x, rug.y, rug.w, rug.h, rug.color, rug.seed));
+        for (const item of sh.wallItems) {
+          this.safe(() => {
+            const sprite = this.art.furnitureSprites(item.kind, item.variant, 0, { seed: sh.slot }).base;
+            const origin = wallItemOrigin(toWallVis(item, `shell:${sh.slot}`), sprite);
+            d.drawImage(sprite.canvas, origin.x, origin.y);
+          });
+        }
+        for (const f of sh.furniture) {
+          this.safe(() => {
+            const sprites = this.art.furnitureSprites(f.kind, f.variant, 0, { seed: sh.slot });
+            for (const sprite of [sprites.base, sprites.front]) {
+              if (sprite) d.drawImage(sprite.canvas, Math.round(f.x - sprite.ax), Math.round(f.y - sprite.ay));
+            }
+          });
+        }
+        this.shellDecor.set(sh.slot, decor);
         for (const w of sh.windows) this.shellWindows.push(toWallVis(w, `shell:${sh.slot}`));
       }
     }
-    this.desaturate(ctx);
-    // fundo além da área desenhada: a própria grama (amostra espelhada 2x2, sem emendas), já no
-    // tom da borda da vinheta
-    const s = 4 * TILE;
-    try {
-      const tile = document.createElement('canvas');
-      tile.width = 2 * s;
-      tile.height = 2 * s;
-      const tctx = tile.getContext('2d')!;
-      tctx.imageSmoothingEnabled = false;
-      for (const [mx, my] of [
-        [0, 0],
-        [1, 0],
-        [0, 1],
-        [1, 1],
-      ] as const) {
-        tctx.setTransform(mx ? -1 : 1, 0, 0, my ? -1 : 1, mx ? 2 * s : 0, my ? 2 * s : 0);
-        tctx.drawImage(c, 0, 0, s, s, 0, 0, s, s);
-      }
-      tctx.setTransform(1, 0, 0, 1, 0, 0);
-      // média da amostra: suaviza as manchas grandes (que viram faixas ao repetir), mantém o capim
-      const d = tctx.getImageData(0, 0, 2 * s, 2 * s).data;
-      let r = 0;
-      let g = 0;
-      let bl = 0;
-      for (let i = 0; i < d.length; i += 4) {
-        r += d[i];
-        g += d[i + 1];
-        bl += d[i + 2];
-      }
-      const n = d.length / 4;
-      const avg = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(bl / n)})`;
-      tctx.globalAlpha = 0.6;
-      tctx.fillStyle = avg;
-      tctx.fillRect(0, 0, 2 * s, 2 * s);
-      tctx.globalAlpha = 1;
-      tctx.fillStyle = VIGNETTE_EDGE;
-      tctx.fillRect(0, 0, 2 * s, 2 * s);
-      this.grass = this.ctx.createPattern(tile, 'repeat');
-      // cor de fundo (antes do padrão carregar): a média já com o tom da vinheta
-      const k = VIGNETTE_ALPHA;
-      this.clearColor = `rgb(${Math.round((r / n) * (1 - k) + 18 * k)},${Math.round((g / n) * (1 - k) + 40 * k)},${Math.round((bl / n) * (1 - k) + 26 * k)})`;
-    } catch {
-      this.grass = null;
-      this.clearColor = '#6f9a5a';
-    }
-    this.finishBase(ctx, cols);
     this.base = c;
   }
 
-  /** Grama ~15% menos saturada: o gramado não compete com o escritório. */
-  private desaturate(ctx: CanvasRenderingContext2D): void {
-    const b = this.exterior.bounds;
-    ctx.save();
-    try {
-      ctx.globalCompositeOperation = 'saturation';
-      ctx.fillStyle = 'rgba(128,128,128,0.16)';
-      ctx.fillRect(b.x * TILE, b.y * TILE, b.w * TILE, b.h * TILE);
-    } catch {
-      // navegador sem o modo de mistura: segue sem dessaturar
-    }
-    ctx.restore();
-  }
+  // =================================================================== frame
 
-  /** Acabamento da camada externa: bordas levemente mais escuras (vinheta) e o capacho da entrada. */
-  private finishBase(ctx: CanvasRenderingContext2D, cols: number): void {
-    const b = this.exterior.bounds;
-    const x0 = b.x * TILE;
-    const y0 = b.y * TILE;
-    const w = b.w * TILE;
-    const h = b.h * TILE;
-    ctx.save();
-    // vinheta: escurece com a distância ao prédio e chega ao tom da grama "de fora" exatamente na
-    // borda da área desenhada (máscara de 1 px por tile, ampliada com suavização)
-    const bwT = cols * COL_W;
-    const smooth = (a: number, z: number, v: number) => {
-      const t = Math.max(0, Math.min(1, (v - a) / Math.max(1e-6, z - a)));
-      return t * t * (3 - 2 * t);
-    };
-    try {
-      const m = document.createElement('canvas');
-      m.width = b.w;
-      m.height = b.h;
-      const mctx = m.getContext('2d')!;
-      const img = mctx.createImageData(b.w, b.h);
-      for (let ty = 0; ty < b.h; ty++) {
-        for (let tx = 0; tx < b.w; tx++) {
-          const wx = b.x + tx + 0.5;
-          const wy = b.y + ty + 0.5;
-          const fx = wx < 0 ? smooth(6, -b.x, -wx) : wx > bwT ? smooth(6, b.x + b.w - bwT, wx - bwT) : 0;
-          const fy = wy < 0 ? smooth(5, -b.y, -wy) : wy > BUILDING_H ? smooth(12, b.y + b.h - BUILDING_H, wy - BUILDING_H) : 0;
-          const i = (ty * b.w + tx) * 4;
-          img.data[i] = 18;
-          img.data[i + 1] = 40;
-          img.data[i + 2] = 26;
-          img.data[i + 3] = Math.round(Math.max(fx, fy) * VIGNETTE_ALPHA * 255);
+  /** A cached architectural board gives the indoor cutaway a finished surround. */
+  private drawBackdrop(w: number, h: number): void {
+    if (!this.backdrop || this.backdrop.width !== w || this.backdrop.height !== h) {
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const d = c.getContext('2d')!;
+      const wash = d.createRadialGradient(w * 0.7, h * 0.4, 0, w * 0.7, h * 0.4, Math.max(w, h));
+      wash.addColorStop(0, '#3d5357');
+      wash.addColorStop(1, '#23353d');
+      d.fillStyle = wash;
+      d.fillRect(0, 0, w, h);
+      const step = Math.max(24, Math.round(32 * this.camera.dpr));
+      for (let x = 0; x < w; x += step) {
+        d.fillStyle = x % (step * 4) === 0 ? '#ffffff0b' : '#ffffff05';
+        d.fillRect(x, 0, 1, h);
+      }
+      for (let y = 0; y < h; y += step) {
+        d.fillStyle = y % (step * 4) === 0 ? '#ffffff0b' : '#ffffff05';
+        d.fillRect(0, y, w, 1);
+      }
+      d.fillStyle = '#b5c8c62b';
+      for (let x = step * 2; x < w; x += step * 4) {
+        for (let y = step * 2; y < h; y += step * 4) {
+          d.fillRect(x - 2, y, 5, 1);
+          d.fillRect(x, y - 2, 1, 5);
         }
       }
-      mctx.putImageData(img, 0, 0);
-      ctx.imageSmoothingEnabled = true;
-      ctx.drawImage(m, x0, y0, w, h);
-      ctx.imageSmoothingEnabled = false;
-    } catch {
-      // sem vinheta
+      this.backdrop = c;
     }
-    // capacho diante da fachada de vidro da entrada (oeste do corredor)
-    const my = (CORRIDOR_Y + 1.25) * TILE;
-    ctx.fillStyle = '#3f4652';
-    ctx.fillRect(-1.75 * TILE, my, 1.5 * TILE, 2.5 * TILE);
-    ctx.fillStyle = '#596170';
-    ctx.fillRect(-1.75 * TILE + 2, my + 2, 1.5 * TILE - 4, 2.5 * TILE - 4);
-    ctx.fillStyle = '#4b525f';
-    for (let y = my + 4; y < my + 2.5 * TILE - 4; y += 3) ctx.fillRect(-1.75 * TILE + 3, y, 1.5 * TILE - 6, 1);
-    ctx.restore();
+    this.ctx.drawImage(this.backdrop, 0, 0);
   }
-
-  // =================================================================== frame
 
   frame(now: number, dt: number, opts: WorldOptions, sel: { agent: string | null; room: string | null; hover: string | null }): void {
     const { ctx, camera } = this;
     this.date.setTime(this.clock());
     this.dt = dt;
-    this.updateCars(now, dt);
     const W = this.canvas.width;
     const H = this.canvas.height;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = this.clearColor;
-    ctx.fillRect(0, 0, W, H);
+    this.drawBackdrop(W, H);
     const { scale, ox, oy } = camera.transform();
     ctx.setTransform(scale, 0, 0, scale, ox, oy);
     const vx0 = -ox / scale;
     const vy0 = -oy / scale;
     const vx1 = vx0 + W / scale;
     const vy1 = vy0 + H / scale;
-    if (this.grass && this.base) {
-      const bx1 = this.baseX + this.base.width;
-      const by1 = this.baseY + this.base.height;
-      if (vx0 < this.baseX || vy0 < this.baseY || vx1 > bx1 || vy1 > by1) {
-        // padrão ancorado na origem do mundo (múltiplo do tile), alinhado à camada base
-        ctx.fillStyle = this.grass;
-        ctx.save();
-        ctx.translate(this.baseX, this.baseY);
-        ctx.fillRect(vx0 - this.baseX - 1, vy0 - this.baseY - 1, vx1 - vx0 + 2, vy1 - vy0 + 2);
-        ctx.restore();
-      }
-    }
     const visible = (x: number, y: number, w: number, h: number) => x < vx1 && x + w > vx0 && y < vy1 && y + h > vy0;
 
     // ---- camada base (só a parte visível)
     if (this.base) {
+      ctx.fillStyle = '#111e2555';
+      ctx.fillRect(this.baseX + 5, this.baseY + 9, this.base.width, this.base.height);
+      ctx.fillStyle = '#b2b1a7';
+      ctx.fillRect(this.baseX, this.baseY, this.base.width, this.base.height);
       const sx = Math.max(0, Math.floor(vx0 - this.baseX) - 1);
       const sy = Math.max(0, Math.floor(vy0 - this.baseY) - 1);
       const sw = Math.min(this.base.width - sx, Math.ceil(vx1 - vx0) + 3);
       const sh = Math.min(this.base.height - sy, Math.ceil(vy1 - vy0) + 3);
       if (sw > 0 && sh > 0) ctx.drawImage(this.base, sx, sy, sw, sh, this.baseX + sx, this.baseY + sy, sw, sh);
+    }
+    for (const sh of this.shells) {
+      const room = this.roomInSlot(sh.slot);
+      if (room && room.phase !== 'building' && room.phase !== 'dismantling') continue;
+      const decor = this.shellDecor.get(sh.slot);
+      if (!decor) continue;
+      const cover = room ? buildAnim(room.phase, room.progress(now)).floor : 0;
+      ctx.globalAlpha = 1 - cover;
+      ctx.drawImage(decor, sh.rect.x * TILE, sh.rect.y * TILE);
+      ctx.globalAlpha = 1;
     }
     // hora do ciclo dia/noite (preferência ou hora forçada; o relógio de parede acompanha a forçada)
     if (this.hourOverride !== null) {
@@ -930,6 +870,7 @@ export class Renderer {
    * mesa ao lado).
    */
   private drawCobwebs(now: number): void {
+    if (this.formal) return;
     const { ctx } = this;
     for (const ch of this.sim.chars.values()) {
       if (ch.mode !== 'shell' || !ch.shellSince || ch.leaving || !ch.seated || ch.atSpot !== ch.homeSpot) continue;
@@ -1179,7 +1120,14 @@ export class Renderer {
   private drawLighting(now: number, vx0: number, vy0: number, vx1: number, vy1: number): void {
     const { ctx } = this;
     const view = { x0: vx0, y0: vy0, x1: vx1, y1: vy1 };
+    // The board is outside the scene; the day/night cycle only shades the building.
+    ctx.save();
+    ctx.beginPath();
+    const b = this.exterior.bounds;
+    ctx.rect(b.x * TILE, b.y * TILE, b.w * TILE, b.h * TILE);
+    ctx.clip();
     this.lighting.drawAmbient(ctx, this, view, now, this.dt);
+    ctx.restore();
     const n = this.night;
     // salas com a luz apagada (e a transição de acender/apagar)
     for (const vis of this.areas.values()) {

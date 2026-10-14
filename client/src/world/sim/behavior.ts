@@ -65,13 +65,14 @@ export function screenModeFor(kind: ActivityKind | undefined): ScreenMode {
   }
 }
 
-export type IdleActivity = 'coffee' | 'water' | 'bathroom' | 'lounge' | 'pingpong' | 'talk' | 'window' | 'shelf' | 'stretch' | 'arcade' | 'snack' | 'mirror' | 'phone';
+export type IdleActivity = 'coffee' | 'water' | 'bathroom' | 'lounge' | 'reception' | 'pingpong' | 'talk' | 'window' | 'shelf' | 'stretch' | 'arcade' | 'snack' | 'mirror' | 'phone';
 
 export const IDLE_WEIGHTS: Readonly<Record<IdleActivity, number>> = {
   coffee: 18,
   water: 12,
   bathroom: 8,
   lounge: 12,
+  reception: 8,
   pingpong: 9,
   talk: 13,
   window: 7,
@@ -107,13 +108,22 @@ const SIT_RANGE: Record<WorldOptions['liveliness'], [number, number]> = {
   lively: [3_000, 10_000],
 };
 
-/** Quanto tempo o ocioso fica sentado na mesa antes do próximo passeio. */
+/** Intervalo curto entre tentativas de passeio ou convite. */
 export function idleSitMs(rng: () => number, liveliness: WorldOptions['liveliness']): number {
   const [a, b] = SIT_RANGE[liveliness] ?? SIT_RANGE.normal;
   return a + rng() * (b - a);
 }
 
-/** Ocioso há mais que isso: cochila na mesa e para de passear. */
+/** Tempo de descanso sentado entre passeios: permite uma pausa sem idas e voltas constantes. */
+export function idleRestMs(rng: () => number, liveliness: WorldOptions['liveliness']): number {
+  const [a, b] = liveliness === 'calm' ? [60_000, 120_000] : liveliness === 'lively' ? [25_000, 60_000] : [40_000, 90_000];
+  return a + rng() * (b - a);
+}
+
+/** Depois de um minuto de ociosidade pode cochilar num assento confortável. */
+export const IDLE_NAP_MS = 60_000;
+
+/** Ocioso há mais que isso responde aos convites como sonolento; ainda pode passear. */
 export const LONG_IDLE_MS = 10 * 60_000;
 
 export function isLongIdle(status: AgentStatus, statusSince: number, now: number): boolean {

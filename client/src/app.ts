@@ -39,5 +39,6 @@ export function start(): void {
   }
 
   // Facilita a depuração pelo console do navegador.
-  Object.assign(window, { habblaud: { store, world } });
+  const runtime = { store, world };
+  Object.assign(window, { dissero: runtime, habblaud: runtime });
 }

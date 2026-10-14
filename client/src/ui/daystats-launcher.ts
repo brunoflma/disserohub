@@ -5,11 +5,10 @@ import type { UiComponent, UiContext } from './context';
 import type { DayPanel } from './daystats';
 import { iconButton } from './dom';
 import { tr } from '../../../shared/i18n';
+import { lineIcon } from './icons';
 
 /** Colunas de um gráfico em pixels (o mesmo traço dos outros ícones da barra). */
-const DAY_ICON =
-  '<svg class="ui-px-icon" width="20" height="20" viewBox="0 0 10 10" shape-rendering="crispEdges" aria-hidden="true" focusable="false">' +
-  '<path fill="currentColor" d="M0 9h10v1H0zM1 5h2v4H1zM4 2h2v7H4zM7 4h2v5H7z"/></svg>';
+const DAY_ICON = lineIcon('<path d="M4 20V11m8 9V4m8 16V8M2 20h20"/>');
 
 export class DayLauncher implements UiComponent {
   readonly button: HTMLButtonElement;

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentInfo, FeedItem } from '../../../shared/types';
+import type { AgentInfo, FeedItem, RoomInfo } from '../../../shared/types';
+import type { Selection } from '../world/api';
 import type { SocialEvent } from '../world/api';
 import type { UiContext } from './context';
 import { FeedPanel } from './feed';
@@ -13,6 +14,7 @@ class Element {
   hidden = false;
   title = '';
   innerHTML = '';
+  value = '';
   dataset: Record<string, string> = {};
   scrollHeight = 1_000;
   scrollTop = 0;
@@ -65,24 +67,32 @@ function item(id: string, a: AgentInfo): FeedItem {
   return { id, agentId: a.id, agentName: a.name, account: a.account, roomId: a.roomId, roomName: 'Sala', activity: { id, kind: 'other', icon: '💬', text: id, at: 0 } };
 }
 
+function activityItem(id: string, a: AgentInfo, patch: Partial<FeedItem['activity']>): FeedItem {
+  const f = item(id, a);
+  f.activity = { ...f.activity, ...patch };
+  return f;
+}
+
 let elements: Element[];
-function panel(feed: FeedItem[] = [], agents: AgentInfo[] = []) {
+function panel(feed: FeedItem[] = [], agents: AgentInfo[] = [], options: { feedMode?: 'important' | 'all'; rooms?: RoomInfo[]; selection?: Selection } = {}) {
   let receive!: (fresh: FeedItem[]) => void;
   let social!: (e: SocialEvent) => void;
-  const snapshot = { agents, rooms: [] };
-  const prefs = { hiddenAccounts: [] as string[] };
+  const snapshot = { agents, rooms: options.rooms ?? [] };
+  const prefs = { hiddenAccounts: [] as string[], feedMode: options.feedMode ?? 'all' };
+  let selected = options.selection ?? null;
   let open = true;
   const ctx = {
     store: { feed, snapshot, on: (_event: string, cb: typeof receive) => { receive = cb; } },
     world: { onSocialEvent: (cb: typeof social) => { social = cb; } },
-    prefs, agent: (id: string) => snapshot.agents.find((a) => a.id === id), account: () => undefined,
-    invalidate: () => {}, togglePanel: () => {}, isPanelOpen: () => open,
+    prefs, agent: (id: string) => snapshot.agents.find((a) => a.id === id), account: () => undefined, selection: () => selected,
+    invalidate: () => {}, updatePrefs: (patch: Partial<typeof prefs>) => Object.assign(prefs, patch), togglePanel: () => {}, isPanelOpen: () => open,
   } as unknown as UiContext;
   const view = new FeedPanel(ctx);
   view.render();
   const el = (name: string) => elements.find((e) => e.className === name)!;
-  return { view, receive: (fresh: FeedItem[]) => receive(fresh), social: (e: SocialEvent) => social(e), snapshot, prefs, close: () => { open = false; },
-    scroller: el('ui-feed__scroll'), list: el('ui-feed__list'), pill: el('ui-feed__new') };
+  const modeButtons = elements.filter((e) => e.className === 'ui-feed__mode-btn');
+  return { view, receive: (fresh: FeedItem[]) => receive(fresh), social: (e: SocialEvent) => social(e), snapshot, prefs, setSelection: (next: Selection) => { selected = next; }, close: () => { open = false; },
+    scroller: el('ui-feed__scroll'), list: el('ui-feed__list'), pill: el('ui-feed__new'), scope: el('ui-feed__scope'), important: modeButtons[0], all: modeButtons[1] };
 }
 
 beforeEach(() => {
@@ -92,6 +102,59 @@ beforeEach(() => {
   vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => { cb(0); return 1; });
 });
 afterEach(() => vi.unstubAllGlobals());
+
+describe('FeedPanel focado', () => {
+  it('keeps a pending question and complete raw details through a burst of routine events', () => {
+    const a = agent('a');
+    const question = activityItem('ask-old', a, { kind: 'ask', text: 'Precisa de você', detail: 'Comando original para consulta', at: 1 });
+    const p = panel([], [a], { feedMode: 'important' });
+    p.receive([question, ...Array.from({ length: 120 }, (_, i) => activityItem(`read-${i}`, a, { kind: 'read', text: 'Lendo arquivo', at: i + 2 }))]);
+    p.view.render();
+    expect(p.list.children).toHaveLength(1);
+    expect(p.list.children[0].dataset.key).toBe('ask-old');
+    expect(p.list.children[0].children[1].children[1].textContent).toContain('Comando original para consulta');
+  });
+  it('filtra Importantes, agrupa repetições e conserva os eventos crus', () => {
+    const a = agent('a');
+    const first = activityItem('ask-1', a, { kind: 'ask', icon: '❓', text: 'Precisa de você', at: 100 });
+    const second = activityItem('ask-2', a, { kind: 'ask', icon: '❓', text: 'Precisa de você', at: 105 });
+    const routine = activityItem('read-1', a, { kind: 'read', icon: '📖', text: 'Lendo um arquivo', at: 106 });
+    const p = panel([first, second, routine], [a], { feedMode: 'important' });
+    expect(p.important.getAttribute('aria-pressed')).toBe('true');
+    expect(p.all.getAttribute('aria-pressed')).toBe('false');
+    expect(p.list.children).toHaveLength(1);
+    expect(p.list.children[0].firstElementChild!.children[7].textContent).toContain('2 vezes');
+    expect((p.view as unknown as { items: FeedItem[] }).items).toEqual([first, second, routine]);
+
+    p.all.fire('click');
+    p.view.render();
+    expect(p.all.getAttribute('aria-pressed')).toBe('true');
+    expect(p.list.children).toHaveLength(2);
+  });
+
+  it('oferece projeto/agente ativos e volta a Todos quando o escopo desaparece', () => {
+    const a = agent('a');
+    const b = agent('b');
+    a.roomId = '/p/a';
+    b.roomId = '/p/b';
+    const rooms: RoomInfo[] = [
+      { id: '/p/a', name: 'Projeto A', path: '/p/a', slot: 0, seed: 1, createdAt: 0 },
+      { id: '/p/b', name: 'Projeto B', path: '/p/b', slot: 1, seed: 2, createdAt: 0 },
+    ];
+    const p = panel([item('a-event', a), item('b-event', b)], [a, b], { feedMode: 'all', rooms, selection: { type: 'agent', id: a.id } });
+    expect(p.scope.children.map((option) => option.getAttribute('value'))).toEqual(['all', 'project:/p/a', 'agent:a']);
+    p.scope.value = 'project:/p/a';
+    p.scope.fire('change');
+    p.view.render();
+    expect(p.list.children.map((row) => row.dataset.key)).toEqual(['a-event']);
+
+    p.setSelection(null);
+    p.snapshot.rooms = [];
+    p.view.render();
+    expect(p.scope.value).toBe('all');
+    expect(p.list.children.map((row) => row.dataset.key)).toEqual(['a-event', 'b-event']);
+  });
+});
 
 describe('FeedPanel pausado', () => {
   it.each(['SSE', 'social'])('guarda só os 50 eventos mais novos de %s, sem perder a contagem por conta', (source) => {

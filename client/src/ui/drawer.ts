@@ -6,6 +6,8 @@ import { createAvatarPlaceholder, updateAvatar } from './avatar';
 import { CharacterEditor } from './character-editor';
 import { MessageComposer } from './composer';
 import type { UiComponent, UiContext } from './context';
+import { taskObjective } from '../local/task-objective';
+import { activityDisplayText, sanitizeActivityText } from './feed-policy';
 import { copyText, h, iconButton, KeyedList, setAttr, setHidden, setStyleVar, setText, setTitle, setVariant } from './dom';
 import {
   formatClock,
@@ -119,7 +121,8 @@ function createTimelineItem(): HTMLElement {
 function updateTimelineItem(li: HTMLElement, a: Activity, now: number, who?: string): void {
   const [icon, text, time] = li.children as unknown as HTMLElement[];
   setText(icon, a.icon);
-  setText(text, who ? `${who}: ${a.text}` : a.text);
+  const display = activityDisplayText(a);
+  setText(text, who ? `${who}: ${display}` : display);
   setText(time, relativeTime(a.at, now));
   setAttr(time, 'datetime', new Date(a.at).toISOString());
   setTitle(li, `${formatClock(a.at)} · ${a.text}${a.detail ? `\n${a.detail}` : ''}`);
@@ -201,6 +204,9 @@ class AgentView {
   private name: HTMLElement;
   private role: HTMLElement;
   private title: HTMLElement;
+  private objective: HTMLElement;
+  private objectiveLabel: HTMLElement;
+  private objectiveText: HTMLElement;
   private accChip: HTMLElement;
   private accName: HTMLElement;
   private accProv: HTMLElement;
@@ -242,7 +248,7 @@ class AgentView {
   private actTime: HTMLElement;
   private actDetails: HTMLDetailsElement;
   private actDetail: HTMLElement;
-  /** Mandar mensagem ao agente principal pelo Habblaud (plugin habblaud-mensagens). */
+  /** Mandar mensagem ao agente principal pelo Dissero (plugin habblaud-mensagens). */
   private composer: MessageComposer;
   private msgSec: ReturnType<typeof section>;
   private tasksSec: ReturnType<typeof section>;
@@ -274,6 +280,9 @@ class AgentView {
     this.name = h('h2', { class: 'ui-hero__name' });
     this.role = h('span', { class: 'ui-role' });
     this.title = h('p', { class: 'ui-hero__title' });
+    this.objectiveLabel = h('span', { class: 'ui-work-objective__label' });
+    this.objectiveText = h('span');
+    this.objective = h('p', { class: 'ui-work-objective', hidden: true }, this.objectiveLabel, this.objectiveText);
     this.accChip = createAccountChip('md');
     this.accName = h('span', { class: 'ui-hero__acc-name' });
     this.accProv = createProviderTag('ui-prov--xs');
@@ -360,6 +369,7 @@ class AgentView {
     // No celular a caixa fica presa no rodapé da gaveta enquanto a conversa rola (styles.css, .ui-sec--msg).
     this.msgSec.el.classList.add('ui-sec--msg');
     this.social = new SocialSection(ctx);
+    const socialDetails = h('details', { class: 'ui-work-social' }, h('summary', { text: tr('Vida social e personalização') }), this.social.el);
     this.perm = new PermissionCard(ctx);
 
     this.tasksBar = createProgress(tr('Progresso das tarefas'));
@@ -409,6 +419,7 @@ class AgentView {
       h('div', { class: 'ui-hero' }, this.avatar, heroText),
       this.character.el,
       this.title,
+      this.objective,
       this.gone,
       statusRow,
       this.termBtn,
@@ -419,11 +430,11 @@ class AgentView {
       this.shellsSec.el,
       nowSec.el,
       this.msgSec.el,
-      this.social.el,
       this.tasksSec.el,
       this.teamSec.el,
       this.timelineSec.el,
       statsSec.el,
+      socialDetails,
       this.codexHint,
     );
   }
@@ -538,9 +549,15 @@ class AgentView {
     this.character.render(a, !!live);
     setText(this.role, roleLabel(a));
     setVariant(this.role, 'ui-role--', a.kind);
-    setText(this.title, a.title ?? '');
+    setText(this.title, a.title ? `${tr('Conversa')} · ${sanitizeActivityText(a.title)}` : '');
     setHidden(this.title, !a.title);
     setTitle(this.title, a.title ?? '');
+    const objective = taskObjective(a);
+    setHidden(this.objective, !objective);
+    if (objective) {
+      setText(this.objectiveLabel, tr(objective.label));
+      setText(this.objectiveText, objective.text);
+    }
     updateAccountChip(this.accChip, account, a.account, a.provider);
     setText(this.accName, account?.name ?? a.account);
     updateProviderTag(this.accProv, provider, account?.name ?? '');
@@ -557,7 +574,7 @@ class AgentView {
     const wait = live ? shellWaitIn(a, this.ctx.store.snapshot?.agents ?? [], now) : null;
     const status = wait ? 'shell' : a.status;
     updateStatusDot(this.dot, status);
-    setText(this.statusText, statusLabel(status));
+    setText(this.statusText, wait ? tr('Comando em execução') : status === 'waiting' ? tr('Precisa de você') : status === 'idle' && a.activity?.kind === 'done' ? tr('Último turno concluído') : statusLabel(status));
     // Parado num comando longo: o "desde" é o início do comando (o status do servidor continua 'working').
     const since = wait?.foreground ? wait.since : a.statusSince;
     setText(this.statusSince, relativeTime(since, now));
@@ -577,9 +594,9 @@ class AgentView {
       const where = codex ? tr('ao Codex{0}', [/codex/i.test(accName) ? '' : ` (${accName})`]) : tr('ao terminal da {0}', [accName]);
       setText(this.alertText, tr('Vá {0} em {1} para responder{2}', [where, room?.name ?? tr('seu projeto'), a.waitingFor ? `: ${a.waitingFor}` : '.']));
     }
-    // Perguntas do AskUserQuestion (só leitura): o Codex não pergunta pelo escritório.
+    // Perguntas pendentes, inclusive quando o Codex continua trabalhando enquanto aguarda a resposta.
     const asking = waiting && !codex && a.activity?.kind === 'ask' ? a.activity : undefined;
-    this.renderQuestions(asking);
+    this.renderQuestions(waiting && codex ? (a.pendingQuestions ?? []) : asking ? [asking] : []);
     // Sem o pedido no escritório: dá para responder por aqui com o plugin (só com a trava local, como o cartão). O Codex
     // não responde perguntas pelo escritório.
     const answerable =
@@ -606,7 +623,7 @@ class AgentView {
     // Atividade atual.
     const act = a.activity;
     setText(this.actIcon, act?.icon ?? '·');
-    setText(this.actText, act?.text ?? activityFallback(a));
+    setText(this.actText, act ? activityDisplayText(act) : activityFallback(a));
     // A duração só entra quando o texto ainda não a traz ("Concluiu em 33s" já diz quanto levou).
     const showDuration = !!act?.durationMs && act.kind !== 'done' && !/\d\s?(?:ms|s|min|h)\b/.test(act.text);
     setText(this.actTime, act ? `${relativeTime(act.at, now)}${showDuration ? ` · levou ${formatDuration(act.durationMs!)}` : ''}` : '');
@@ -663,11 +680,11 @@ class AgentView {
     setHidden(this.codexHint, !codex || a.kind !== 'main' || !live || this.ctx.store.replaying);
   }
 
-  /** Lista as perguntas pendentes com as opções, só para leitura (sem o pedido no escritório, a resposta é no Claude Code). */
-  private renderQuestions(act: Activity | undefined): void {
-    const qs = act?.questions ?? [];
+  /** Lista as perguntas pendentes com as opções; a resposta é dada no aplicativo de origem. */
+  private renderQuestions(acts: readonly Activity[]): void {
+    const qs = acts.flatMap((act) => act.questions ?? []);
     setHidden(this.alertQuestions, qs.length === 0);
-    const key = qs.length ? `${act!.id}|${qs.length}` : '';
+    const key = acts.map((act) => `${act.id}|${act.questions?.map((q) => q.index).join(',')}`).join(';');
     if (key === this.alertQuestionsKey) return;
     this.alertQuestionsKey = key;
     this.alertQuestions.replaceChildren(
@@ -724,7 +741,7 @@ class AgentView {
                   this.pty.enabled && ptyControllable(this.last) ? tr('; "Assumir daqui" continua nela aqui') : '',
                 ])
               : kind === 'interativo'
-                ? tr('Abrir o terminal desta sessão, que roda aqui no Habblaud (T)')
+                ? tr('Abrir o terminal desta sessão, que roda aqui no Dissero (T)')
                 : tr('Abrir o terminal: a sessão roda em outro terminal; dá para assumir daqui (T)'),
     );
   }

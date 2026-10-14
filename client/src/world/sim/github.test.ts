@@ -132,10 +132,10 @@ describe('festa: a sala comemora', () => {
     }
   }
 
-  it('quem está na mesa levanta e dá pulinhos; o responsável ganha estrela e confete; quem precisa de você não', () => {
+  it('quem está na mesa comemora; quem precisa de você ou descansa fora da mesa não', () => {
     const sim = new Sim(art, () => ({ ...DEFAULT_WORLD_OPTIONS, liveliness: 'calm' }));
     const clock = { now: T0 };
-    const agents = [agent('ana', '/a', 'working'), agent('bia', '/a', 'idle'), agent('caio', '/a', 'waiting'), agent('davi', '/b', 'working')];
+    const agents = [agent('ana', '/a', 'working'), agent('bia', '/a', 'working'), agent('caio', '/a', 'waiting'), agent('davi', '/b', 'working'), agent('eva', '/a', 'idle')];
     sim.applySnapshot(snap([room('/a', 0), room('/b', 1)], agents), clock.now);
     run(sim, clock, 0.5);
     sim.applySnapshot(snap([room('/a', 0, party(clock.now, 'ana')), room('/b', 1)], agents, clock.now, 2), clock.now);

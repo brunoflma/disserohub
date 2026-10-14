@@ -11,11 +11,9 @@ const DISCONNECTED_BANNER_MS = 8_000;
 
 function brandMark(size: number): HTMLElement {
   const mark = h('span', { class: 'ui-brand__mark' });
-  const img = h('img', { attrs: { src: '/assets/brand/logo-mark@4x.png', alt: '', width: size, height: size, draggable: 'false' } });
-  img.addEventListener('error', () => {
-    mark.innerHTML = FALLBACK_MARK;
-  });
-  mark.append(img);
+  mark.style.width = `${size}px`;
+  mark.style.height = `${size}px`;
+  mark.innerHTML = FALLBACK_MARK;
   return mark;
 }
 
@@ -48,8 +46,8 @@ export class Splash implements UiComponent {
     }
     const waited = performance.now() - this.startedAt;
     let text = tr('Conectando ao escritório…');
-    if (waited > DISCONNECTED_BANNER_MS) text = tr('O servidor do Habblaud não responde. Confira se ele está rodando (npm run dev ou npm start); seguimos tentando.');
-    else if (store.connection === 'closed') text = tr('Não foi possível conectar ao servidor do Habblaud. Tentando de novo…');
+    if (waited > DISCONNECTED_BANNER_MS) text = tr('O servidor do Dissero não responde. Confira se ele está rodando (npm run dev ou npm start); seguimos tentando.');
+    else if (store.connection === 'closed') text = tr('Não foi possível conectar ao servidor do Dissero. Tentando de novo…');
     setText(this.text, text);
     // Reavalia o texto mesmo sem eventos novos.
     this.tick ??= setTimeout(() => {
@@ -172,8 +170,8 @@ export class ConnectionBanner implements UiComponent {
     setText(
       this.text,
       store.snapshot
-        ? tr('Sem conexão com o servidor do Habblaud há algum tempo. O escritório mostra o último estado conhecido.')
-        : tr('O servidor do Habblaud não responde. Confira se ele está rodando (npm run dev ou npm start).'),
+        ? tr('Sem conexão com o servidor do Dissero há algum tempo. O escritório mostra o último estado conhecido.')
+        : tr('O servidor do Dissero não responde. Confira se ele está rodando (npm run dev ou npm start).'),
     );
     const next = store.nextRetryAt;
     const secs = next === null ? 0 : Math.max(1, Math.ceil((next - Date.now()) / 1000));

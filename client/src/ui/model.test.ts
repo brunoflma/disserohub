@@ -9,9 +9,11 @@ import {
   FOREGROUND_WAIT_MS,
   groupRooms,
   hasRunningShells,
+  isSessionActive,
   matchesQuery,
   mergeHistory,
   roleLabel,
+  sessionStateLabel,
   SHELL_STAGES,
   shellBoxText,
   shellDoneKind,
@@ -80,6 +82,16 @@ describe('computeCounters', () => {
 });
 
 describe('groupRooms', () => {
+  it('mantém projetos cadastrados sem agentes na lista e na busca, respeitando o filtro de atividade', () => {
+    const registered = { ...room('Peças jurídicas', 0, '/projetos/pecas'), registered: true };
+    const s = { rooms: [registered], accounts: [], agents: [] };
+    const filter = { query: '', hiddenAccounts: new Set<string>(), sessions: 'all' as const };
+    expect(groupRooms(s, filter).map((g) => g.room.id)).toEqual([registered.id]);
+    expect(groupRooms(s, { ...filter, query: 'pecas juridicas' })).toHaveLength(1);
+    expect(groupRooms(s, { ...filter, query: 'outro' })).toEqual([]);
+    expect(groupRooms(s, { ...filter, sessions: 'active' })).toEqual([]);
+    expect(groupRooms({ ...s, rooms: [{ ...registered, registered: false }] }, filter)).toEqual([]);
+  });
   it('ordena salas por slot e aninha subagentes sob o pai', () => {
     const g = groupRooms(snap);
     expect(g.map((r) => r.room.id)).toEqual(['api', 'site', 'loja']);
@@ -119,6 +131,55 @@ describe('groupRooms', () => {
   });
   it('sem snapshot devolve lista vazia', () => {
     expect(groupRooms(null)).toEqual([]);
+  });
+});
+
+describe('sessões em andamento', () => {
+  const filter = { query: '', hiddenAccounts: new Set<string>(), sessions: 'active' as const };
+  const running = agent({ id: 'running', roomId: 'api', status: 'working' });
+  const waiting = agent({ id: 'waiting', roomId: 'api', status: 'waiting' });
+  const shell = agent({ id: 'shell', roomId: 'api', status: 'shell' });
+  const finished = agent({ id: 'finished', roomId: 'site', status: 'idle', activity: { id: 'done', kind: 'done', icon: '✅', text: 'Concluiu', at: 10 } });
+  const idle = agent({ id: 'idle', roomId: 'site', status: 'idle', activity: { id: 'old', kind: 'run', icon: '💻', text: 'Rodando teste', at: 1 } });
+  const sessionSnap = { rooms, accounts, agents: [running, waiting, shell, finished, idle] };
+
+  it('inclui execução e espera, excluindo turnos concluídos mesmo com atividade antiga de execução', () => {
+    const g = groupRooms(sessionSnap, filter);
+    expect(g.map((r) => r.room.id)).toEqual(['api']);
+    expect(g[0].nodes.map((n) => n.agent.id)).toEqual(['running', 'shell', 'waiting']);
+    expect(['working', 'waiting', 'shell', 'idle', 'done', 'offline'].map((status) => isSessionActive({ status: status as AgentInfo['status'] }))).toEqual([true, true, true, false, false, false]);
+  });
+
+  it('mantém o pai ocioso como contexto e mostra apenas os subagentes ativos', () => {
+    const parent = agent({ id: 'parent', roomId: 'api', status: 'idle', title: 'Revisar projeto' });
+    const sub = agent({ id: 'sub', roomId: 'api', kind: 'sub', parentId: parent.id });
+    const done = agent({ id: 'done', roomId: 'api', kind: 'sub', parentId: parent.id, status: 'done' });
+    const s = { rooms, accounts, agents: [parent, sub, done] };
+    const g = groupRooms(s, { ...filter, query: 'revisar projeto' });
+    expect(g[0].nodes[0].agent.id).toBe(parent.id);
+    expect(g[0].nodes[0].subs.map((a) => a.id)).toEqual(['sub']);
+    expect(sessionStateLabel(parent, s.agents)).toBe('Subagentes ativos');
+    expect(groupRooms(s, { ...filter, hiddenAccounts: new Set(['.claude']) })).toEqual([]);
+  });
+
+  it('o filtro Em andamento retira a sessão ao concluir; Recentes mantém a sessão visível', () => {
+    expect(groupRooms({ rooms, accounts, agents: [running] }, filter)).toHaveLength(1);
+    const completed = { ...running, status: 'idle' as const, activity: finished.activity };
+    expect(groupRooms({ rooms, accounts, agents: [completed] }, filter)).toEqual([]);
+    const all = groupRooms({ rooms, accounts, agents: [completed] }, { ...filter, sessions: 'all' });
+    expect(all).toHaveLength(1);
+    expect(all[0].nodes[0].agent.id).toBe(running.id);
+    expect(sessionStateLabel(completed)).toBe('Concluída');
+  });
+
+  it('rótulos distinguem trabalho, resposta pendente, conclusão e espera por novas instruções', () => {
+    expect(sessionStateLabel(running)).toBe('Em andamento');
+    expect(sessionStateLabel(waiting)).toBe('Aguardando você');
+    expect(sessionStateLabel(shell)).toBe('Comando em execução');
+    expect(sessionStateLabel(finished)).toBe('Concluída');
+    expect(sessionStateLabel(idle)).toBe('Aguardando instruções');
+    expect(sessionStateLabel({ ...finished, status: 'done' })).toBe('Concluída');
+    expect(sessionStateLabel({ ...finished, status: 'offline' })).toBe('Encerrada');
   });
 });
 

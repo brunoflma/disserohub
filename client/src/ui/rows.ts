@@ -3,7 +3,8 @@ import type { AccountInfo, AgentInfo } from '../../../shared/types';
 import { createAvatar, updateAvatar, type AvatarSize } from './avatar';
 import { h, setAttr, setHidden, setStyleVar, setText, setTitle, setVariant } from './dom';
 import { formatDuration } from './format';
-import { activityFallback, shellLine, shellWaitIn, statusLabel } from './model';
+import { activityFallback, sessionStateLabel, shellLine, shellWaitIn, statusLabel } from './model';
+import { activityDisplayText } from './feed-policy';
 import {
   createAccountChip,
   createActivityLine,
@@ -28,6 +29,7 @@ interface RowRefs {
   task: HTMLElement;
   /** Há quanto tempo está ocioso (no lugar do "Principal"). */
   since: HTMLElement;
+  state: HTMLElement;
   size: AvatarSize;
 }
 
@@ -42,16 +44,17 @@ export function createAgentRow(agent: AgentInfo, onPick: (id: string) => void, s
   const activity = createActivityLine();
   const task = h('span', { class: 'ui-agent__task', hidden: true });
   const since = h('span', { class: 'ui-agent__since', hidden: true });
+  const state = h('span', { class: 'ui-agent__state' });
   const row = h(
     'button',
     { class: 'ui-agent', type: 'button' },
     avatar,
-    h('span', { class: 'ui-agent__main' }, h('span', { class: 'ui-agent__top' }, name, chip, since, role), task, activity),
+    h('span', { class: 'ui-agent__main' }, h('span', { class: 'ui-agent__top' }, name, chip, since, role), task, state, activity),
     dot,
   );
   row.dataset.id = agent.id;
   row.addEventListener('click', () => onPick(row.dataset.id!));
-  refs.set(row, { avatar, name, chip, role, dot, activity, task, since, size });
+  refs.set(row, { avatar, name, chip, role, dot, activity, task, since, state, size });
   return row;
 }
 
@@ -89,6 +92,12 @@ export function updateAgentRow(
   // Esperando um shell (ou parado num comando longo): ampulheta no ponto e o cronômetro na linha de atividade.
   const wait = shellWaitIn(agent, agents, now);
   const status = wait ? 'shell' : agent.status;
+  const state = wait ? 'Comando em execução' : sessionStateLabel(agent, agents);
+  const elapsed = Math.max(0, now - (wait?.since ?? agent.statusSince));
+  const label = state === 'Em andamento' ? tr('Trabalhando') : state === 'Subagentes ativos' ? tr('Equipe ativa') : wait ? tr('Em comando') : state;
+  setText(r.state, `${label}${(status === 'working' || status === 'waiting') && elapsed >= 1000 ? ` · ${formatDuration(elapsed)}` : ''}`);
+  setTitle(r.state, state === 'Concluída' && agent.status === 'idle' ? 'Último turno concluído. A sessão continua aberta para novas instruções.' : state);
+  setVariant(r.state, 'is-', state === 'Subagentes ativos' ? 'working' : state === 'Concluída' ? 'done' : status);
   updateStatusDot(r.dot, status);
   if (wait) updateShellActivityLine(r.activity, wait, now);
   else updateActivityLine(r.activity, agent.activity, activityFallback(agent));
@@ -96,10 +105,10 @@ export function updateAgentRow(
   row.classList.toggle('is-selected', selected);
   setAttr(row, 'aria-current', selected ? 'true' : null);
   // Para leitores de tela, o tempo em minutos (o cronômetro mudaria o rótulo a cada segundo).
-  const doing = wait ? tr('{0}, há {1}', [shellLine(wait, now).label, formatDuration(now - wait.since)]) : agent.activity?.text;
+  const doing = wait ? tr('{0}, há {1}', [shellLine(wait, now).label, formatDuration(now - wait.since)]) : agent.activity ? activityDisplayText(agent.activity) : undefined;
   setAttr(
     row,
     'aria-label',
-    `${agent.name}, ${agent.kind === 'main' ? tr('agente principal') : tr('subagente {0}', [agent.role])}, ${account?.name ?? agent.account}${agent.provider === 'codex' ? ' (Codex)' : ''}, ${statusLabel(status)}${doing ? `: ${doing}` : ''}`,
+    `${agent.name}, ${agent.kind === 'main' ? tr('agente principal') : tr('subagente {0}', [agent.role])}, ${account?.name ?? agent.account}${agent.provider === 'codex' ? ' (ChatGPT)' : ''}, ${state}, ${statusLabel(status)}${doing ? `: ${doing}` : ''}`,
   );
 }

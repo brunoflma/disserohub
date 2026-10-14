@@ -1,4 +1,4 @@
-// Versão do Habblaud: o número na barra superior, o selo "Nova versão" quando o GitHub tem uma release mais
+// Versão do Dissero: o número na barra superior, o selo "Nova versão" quando o GitHub tem uma release mais
 // nova (quem consulta é o servidor, server/updates/checker.ts), o aviso único por versão e a seção "Sobre"
 // das configurações (estado da verificação, "Verificar agora", novidades e como atualizar).
 import type { Notice, OfficeSnapshot, UpdateStatus } from '../../../shared/types';
@@ -8,6 +8,7 @@ import { formatDateTime, relativeTime } from './format';
 import { pixelIcon } from './icons';
 import { safeLocalStorage } from './prefs';
 import { tr } from '../../../shared/i18n';
+import { UPSTREAM_BASE_VERSION } from '../../../shared/distribution';
 
 /** Última versão nova já avisada neste navegador (o aviso sai uma vez por versão). */
 export const UPDATE_SEEN_KEY = 'habblaud:update-seen';
@@ -57,8 +58,8 @@ export function updateStatusLine(version: string, s: UpdateStatus | undefined, n
 
 /** Dica do número de versão na barra superior. */
 export function versionChipTitle(version: string, s: UpdateStatus | undefined, now: number): string {
-  if (s?.available && s.latest) return tr('Nova versão do Habblaud: v{0} (você usa a v{1}). Clique para ver as novidades e como atualizar.', [s.latest, version]);
-  return tr('Habblaud v{0}. {1} Clique para ver detalhes.', [version, updateStatusLine(version, s, now).text]);
+  if (s?.available && s.latest) return tr('Nova versão do Dissero: v{0} (você usa a v{1}). Clique para ver as novidades e como atualizar.', [s.latest, version]);
+  return tr('Dissero v{0}. {1} Clique para ver detalhes.', [version, updateStatusLine(version, s, now).text]);
 }
 
 /** Número da versão na barra superior; vira o selo "Nova versão" quando há release mais nova. */
@@ -114,7 +115,7 @@ export class UpdateToaster implements UiComponent {
     } catch {
       // Sem armazenamento: avisa uma vez por página aberta.
     }
-    this.push({ id: `update:${s.latest}`, level: 'success', text: tr('Nova versão do Habblaud: v{0}. Veja as novidades e como atualizar em Configurações › Sobre.', [s.latest]), at: this.ctx.now() });
+    this.push({ id: `update:${s.latest}`, level: 'success', text: tr('Nova versão do Dissero: v{0}. Veja as novidades e como atualizar em Configurações › Sobre.', [s.latest]), at: this.ctx.now() });
   }
 }
 
@@ -142,13 +143,7 @@ export class AboutGroup {
       h(
         'p',
         { class: 'ui-set__hint' },
-        tr('Para atualizar, na pasta do Habblaud: '),
-        h('code', { class: 'ui-usage-setup__cmd', text: 'git pull' }),
-        tr(' e de novo '),
-        h('code', { class: 'ui-usage-setup__cmd', text: 'npm run docker:up' }),
-        tr(' (sem Docker: '),
-        h('code', { class: 'ui-usage-setup__cmd', text: 'npm run build && npm start' }),
-        ').',
+        tr('Instale somente versões publicadas pelo DisseroHub. Consulte as novidades acima para as instruções de atualização.'),
       ),
     );
     this.repo = h('a', { class: 'ui-link-btn', text: tr('Código no GitHub'), attrs: { target: '_blank', rel: 'noopener noreferrer' } });
@@ -156,7 +151,8 @@ export class AboutGroup {
       'div',
       { class: 'ui-set-group ui-about', attrs: { id: 'ui-about' } },
       h('h3', { text: tr('Sobre'), tabIndex: -1 }),
-      h('div', { class: 'ui-about__head' }, h('span', { class: 'ui-about__name' }, 'Habblaud ', this.name), this.checkBtn),
+      h('p', { class: 'ui-small', text: `Base técnica: Habblaud v${UPSTREAM_BASE_VERSION}. As atualizações do Dissero são verificadas no DisseroHub, com nossas customizações e melhorias.` }),
+      h('div', { class: 'ui-about__head' }, h('span', { class: 'ui-about__name' }, 'Dissero ', this.name), this.checkBtn),
       this.status,
       this.fresh,
       this.repo,
@@ -202,9 +198,9 @@ export class AboutGroup {
     this.failure = undefined;
     this.render();
     try {
-      if (!(await this.ctx.store.checkUpdates())) this.failure = tr('Não deu para falar com o servidor do Habblaud.');
+      if (!(await this.ctx.store.checkUpdates())) this.failure = tr('Não deu para falar com o servidor do Dissero.');
     } catch {
-      this.failure = tr('Não deu para falar com o servidor do Habblaud.');
+      this.failure = tr('Não deu para falar com o servidor do Dissero.');
     } finally {
       this.checking = false;
       this.render();

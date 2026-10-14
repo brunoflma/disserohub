@@ -20,5 +20,6 @@ export const THEME_COUNT = THEMES.length;
 export function roomTheme(seed: number): RoomTheme {
   const n = THEMES.length;
   const t = THEMES[((Math.floor(seed) % n) + n) % n];
-  return { ...t, wall: { ...t.wall } };
+  // Warm stone, muted room accents and walnut furniture for the legal office.
+  return { ...t, deskVariant: 'legal', chairVariant: 'black', wall: { ...t.wall, base: '#f2ede4', trim: '#ad9675', pattern: 'wood_panel' } };
 }

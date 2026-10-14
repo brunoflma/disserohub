@@ -5,6 +5,8 @@ import { trim, type BufFurniture } from '../core/sprite';
 import * as C from './common';
 import * as O from './office';
 import * as W from './wall';
+import { legalBookshelf, legalDesk, legalMeetingTable } from './legal';
+import { hygieneCabinet, magazineRack, washroomVanity } from './facilities';
 
 /** Quantas variações de detalhes (seed) cada kind tem; os demais ignoram a seed. */
 export const SEED_VARIATIONS: Partial<Record<FurnitureKind, number>> = {
@@ -34,15 +36,15 @@ export function normalizeFurniture(kind: FurnitureKind, variant?: string, state?
 function build(kind: FurnitureKind, variant: string | undefined, state: number, seed: number): BufFurniture {
   switch (kind) {
     case 'desk':
-      return O.desk(variant, seed);
+      return variant === 'legal' ? legalDesk(seed) : O.desk(variant, seed);
     case 'desk_back':
-      return O.deskBack(variant, seed);
+      return variant === 'legal' ? legalDesk(seed, true) : O.deskBack(variant, seed);
     case 'office_chair':
       return O.officeChair(variant);
     case 'office_chair_front':
       return O.officeChairFront(variant);
     case 'bookshelf':
-      return O.bookshelf(seed);
+      return variant === 'legal' ? legalBookshelf(seed) : O.bookshelf(seed);
     case 'filing_cabinet':
       return O.filingCabinet();
     case 'printer':
@@ -58,7 +60,7 @@ function build(kind: FurnitureKind, variant: string | undefined, state: number, 
     case 'binder_shelf':
       return O.binderShelf(seed);
     case 'meeting_table':
-      return O.meetingTable(seed);
+      return variant === 'legal' ? legalMeetingTable(seed) : O.meetingTable(seed);
     case 'stool':
       return O.stool();
     case 'floor_lamp':
@@ -121,6 +123,12 @@ function build(kind: FurnitureKind, variant: string | undefined, state: number, 
       return C.toiletStall(state);
     case 'sink':
       return C.sink();
+    case 'washroom_vanity':
+      return washroomVanity();
+    case 'hygiene_cabinet':
+      return hygieneCabinet();
+    case 'magazine_rack':
+      return magazineRack();
     case 'reception_desk':
       return C.receptionDesk(seed);
     case 'bench':

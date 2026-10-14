@@ -152,7 +152,7 @@ const WALL_ART_TOP = 28;
  * recebem as pinturas largas); pôsteres preferem a mesma variante do procedural. Puro.
  */
 export function pickWallArt(assets: WorldAssets | null, kind: 'painting' | 'poster', tiles: number, variant: string | undefined, seed: number): WallArtAsset | null {
-  if (!assets) return null;
+  if (!assets || variant?.startsWith('law_')) return null;
   let pool = assets.wallArt.filter((a) => a.kind === kind && a.tiles === tiles);
   if (kind === 'poster' && variant) {
     const same = pool.filter((a) => a.variant === variant);

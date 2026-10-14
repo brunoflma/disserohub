@@ -86,13 +86,13 @@ export interface Activity {
   at: number;
   durationMs?: number;
   error?: boolean;
-  /** Perguntas completas de um AskUserQuestion (kind 'ask'), para o escritório mostrar as opções. */
+  /** Perguntas de Claude/Codex (kind 'ask'), mascaradas e cortadas para mostrar as opções. */
   questions?: AskQuestion[];
 }
 
 /**
- * Uma pergunta do AskUserQuestion, já mascarada e cortada. Com o pedido no escritório (PermissionRequestInfo.questions),
- * dá para responder por lá; senão a resposta é dada no Claude Code.
+ * Uma pergunta, já mascarada e cortada. Com o pedido no escritório (PermissionRequestInfo.questions),
+ * dá para responder por lá; senão a resposta é dada no Claude Code ou Codex.
  */
 export interface AskQuestion {
   /** Posição da pergunta em `tool_input.questions` (entradas inválidas são puladas, então pode haver saltos). */
@@ -154,6 +154,8 @@ export interface AgentInfo {
   waitingFor?: string;
   /** Atividade atual (ou a mais recente). */
   activity?: Activity;
+  /** Perguntas do Codex ainda sem resposta; independem da atividade que o agente continua executando. */
+  pendingQuestions?: Activity[];
   /** Últimas atividades, da mais antiga para a mais recente (máx. ~30). */
   recent: Activity[];
   tasks: TaskItem[];
@@ -206,6 +208,8 @@ export interface RoomInfo {
   createdAt: number;
   /** Efeito visual temporário na sala (eventos do GitHub detectados nos transcripts; ver shared/github.ts). */
   effect?: RoomEffect;
+  /** Pasta adicionada pelo usuário: a sala permanece visível mesmo sem sessões. */
+  registered?: boolean;
 }
 
 /**
@@ -380,6 +384,8 @@ export interface AccessInfo {
   terminal: boolean;
   /** Pode abrir agentes novos no app do Claude (POST /api/spawn). */
   spawn: boolean;
+  /** Pode escolher e cadastrar pastas de projetos no computador local. */
+  projects?: boolean;
 }
 
 export interface FeedItem {

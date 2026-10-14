@@ -22,6 +22,9 @@ import { AUDIO_BODY_MAX, type DictationService } from '../dictation/dictation';
 import type { DeliveryIndex } from '../deliveries/deliveries';
 import type { FileFetcher } from '../deliveries/fetcher';
 import { HOST_WAIT_MS } from '../host-wait';
+import type { ProjectFolders } from '../projects/folders';
+import { parsePreferenceEntries, PREFERENCE_BODY_MAX, PREFERENCE_TRANSFER_PATH } from '../../shared/branding';
+import { PreferenceTransfers, preferenceTransferRole } from './branding';
 
 export interface ApiDeps {
   office: Office;
@@ -67,6 +70,8 @@ export interface ApiDeps {
   spawn?: SpawnService;
   /** Pastas sugeridas no "Novo agente" (GET /api/spawn/folders; spawn/folders.ts): projetos recentes. */
   spawnFolders?: () => Promise<SpawnFolder[]>;
+  /** Cadastro e escolha de pastas; somente na conexão local, sem acesso remoto. */
+  projects?: ProjectFolders;
   /** Anexos do "Novo agente" (POST /api/spawn/attachments; spawn/attachments.ts). */
   attachments?: AttachmentStore;
   /** Ditado (/api/dictation e, para o auxiliar do host, /api/host/dictation/*; dictation/dictation.ts). */
@@ -105,6 +110,16 @@ function isLoopbackAddress(addr: string | undefined): boolean {
   if (!addr) return false;
   const a = addr.replace(/^::ffff:/i, '');
   return a === '::1' || /^127\./.test(a);
+}
+
+/** O navegador de pastas aceita somente a própria página, inclusive nas leituras. */
+function sameProjectOrigin(req: IncomingMessage): boolean {
+  if (req.headers.origin === undefined) return true;
+  try {
+    const origin = new URL(req.headers.origin);
+    const protocol = 'encrypted' in req.socket && req.socket.encrypted ? 'https:' : 'http:';
+    return origin.protocol === protocol && origin.host.toLowerCase() === req.headers.host?.trim().toLowerCase();
+  } catch { return false; }
 }
 
 /** Rotas das mensagens pelo escritório (server/messages/http.ts); /api/mod/summary fica de fora (sem trava). */
@@ -256,6 +271,7 @@ export function modSummary(
 
 /** Devolve um handler que trata /api/* e responde false para o resto. */
 export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: ServerResponse, url: URL) => boolean {
+  const preferenceTransfers = new PreferenceTransfers();
   const { office, hub, accounts } = deps;
   const terminals = deps.terminal ? deps.terminals : undefined;
 
@@ -333,6 +349,27 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       sendJson(res, 403, { error: tr('rota só do próprio computador (hooks, plugins e o auxiliar do host)') });
       return true;
     }
+    if (path === PREFERENCE_TRANSFER_PATH) {
+      const role = preferenceTransferRole(req);
+      if (isRemote(req) || deps.inDocker || !role) {
+        req.resume(); sendJson(res, 403, { error: 'Transferência disponível apenas entre os endereços locais do Dissero.' });
+      } else if (method !== 'POST') methodNotAllowed(res, 'POST');
+      else if (!isJsonContentType(req.headers['content-type'])) sendJson(res, 415, { error: 'Esperado conteúdo JSON.' });
+      else readJson(req, PREFERENCE_BODY_MAX).then((raw) => {
+        const body = raw as { entries?: unknown; ticket?: unknown } | null;
+        if (role === 'source') {
+          const entries = parsePreferenceEntries(body?.entries);
+          if (!entries) throw new HttpError(400, 'Preferências inválidas.');
+          sendJson(res, 200, { ticket: preferenceTransfers.issue(entries) });
+        } else {
+          if (typeof body?.ticket !== 'string' || !/^[A-Za-z0-9_-]{32}$/.test(body.ticket)) throw new HttpError(400, 'Transferência inválida.');
+          const entries = preferenceTransfers.claim(body.ticket);
+          if (!entries) throw new HttpError(410, 'Transferência expirada ou já utilizada.');
+          sendJson(res, 200, { entries });
+        }
+      }).catch((err) => fail(res, err));
+      return true;
+    }
     if (path === '/api/stream') {
       if (method !== 'GET') methodNotAllowed(res, 'GET');
       else hub.attach(req, res);
@@ -381,6 +418,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           messages: !!deps.messages && trusted(req, 'messages'),
           terminal: !!terminals && trusted(req, 'terminal'),
           spawn: !!deps.spawn && trusted(req, 'spawn'),
+          ...(deps.projects ? { projects: trusted(req) && isLoopbackAddress(req.socket.remoteAddress) && sameProjectOrigin(req) } : {}),
         };
         sendJson(res, 200, access);
       }
@@ -399,7 +437,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
     if (terminalMatch) {
       if (method !== 'GET') methodNotAllowed(res, 'GET');
       else if (!terminals) {
-        sendJson(res, 403, { error: tr('terminal desligado: ele só funciona com o Habblaud acessível apenas pelo próprio computador') });
+        sendJson(res, 403, { error: tr('terminal desligado: ele só funciona com o Dissero acessível apenas pelo próprio computador') });
       } else if (!trusted(req, 'terminal')) {
         sendJson(res, 403, { error: denied(req, tr('o terminal só abre pelo próprio computador (http://localhost ou http://127.0.0.1)')) });
       } else {
@@ -425,7 +463,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
     if (path === '/api/permissions' || path.startsWith('/api/permissions/')) {
       // Responder pelo escritório age sobre as sessões: a mesma trava do terminal (bind local + Host local).
       if (!deps.permissions) {
-        sendJson(res, 403, { error: tr('responder pelo escritório desligado: só funciona com o Habblaud acessível apenas pelo próprio computador') });
+        sendJson(res, 403, { error: tr('responder pelo escritório desligado: só funciona com o Dissero acessível apenas pelo próprio computador') });
       } else if (!trusted(req, 'permissions')) {
         sendJson(res, 403, { error: denied(req, tr('pedidos de permissão só são respondidos pelo próprio computador (http://localhost ou http://127.0.0.1)')) });
       } else {
@@ -446,7 +484,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       // Mudar o personagem age sobre o escritório: a mesma trava do terminal (bind local + Host local).
       if (method !== 'PUT' && method !== 'DELETE') methodNotAllowed(res, 'PUT, DELETE');
       else if (!deps.terminal) {
-        sendJson(res, 403, { error: tr('editar o personagem desligado: só funciona com o Habblaud acessível apenas pelo próprio computador') });
+        sendJson(res, 403, { error: tr('editar o personagem desligado: só funciona com o Dissero acessível apenas pelo próprio computador') });
       } else if (!trusted(req)) {
         sendJson(res, 403, { error: denied(req, tr('o personagem só é editado pelo próprio computador (http://localhost ou http://127.0.0.1)')) });
       } else {
@@ -469,6 +507,27 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       else if (!trusted(req) || (!deps.inDocker && !isLoopbackAddress(req.socket.remoteAddress))) {
         sendJson(res, 403, { error: denied(req, tr('eventos do Codex só são aceitos pelo próprio computador (http://localhost ou http://127.0.0.1)')) });
       } else handleCodexEvent(req, res, { live: deps.codexLive, entries: () => accounts.entriesOf('codex') }).catch((err) => fail(res, err));
+      return true;
+    }
+    if (path === '/api/projects' || path.startsWith('/api/projects/')) {
+      const projects = deps.projects;
+      if (!projects || !trusted(req) || !isLoopbackAddress(req.socket.remoteAddress) || !sameProjectOrigin(req)) {
+        sendJson(res, 403, { error: tr('Projetos só podem ser adicionados pelo próprio computador.') });
+      } else if (path === '/api/projects/folders') {
+        if (!isRead) methodNotAllowed(res, 'GET');
+        else projects.browse(url.searchParams.get('path') ?? undefined).then((view) => sendJson(res, 200, view), () => sendJson(res, 400, { error: tr('Não foi possível abrir a pasta. Confira o caminho e a permissão de acesso.') }));
+      } else if (path === '/api/projects' && isRead) {
+        sendJson(res, 200, { projects: projects.entries() });
+      } else if (path === '/api/projects' && method === 'POST') {
+        readJson(req).then(async (body) => {
+          const raw = (body as { path?: unknown } | null)?.path;
+          if (typeof raw !== 'string') return sendJson(res, 400, { error: tr('Escolha uma pasta de projeto.') });
+          const project = await projects.add(raw);
+          const roomId = deps.office.registerProject(project.path, project.createdAt);
+          sendJson(res, 201, { roomId, path: project.path });
+        }).catch((err) => sendJson(res, err instanceof HttpError ? err.status : 400, { error: err instanceof HttpError ? err.message : tr('Não foi possível adicionar o projeto. Confira a pasta e a permissão de acesso.') }));
+      } else if (path === '/api/projects') methodNotAllowed(res, 'GET, POST');
+      else sendJson(res, 404, { error: tr('rota não encontrada') });
       return true;
     }
     if (path === '/api/spawn' || path.startsWith('/api/spawn/')) {
@@ -618,7 +677,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       // As mensagens entram na sessão como se você as tivesse digitado: a mesma trava (recurso ligado + Host local).
       if (!deps.messages) {
         sendJson(res, 403, {
-          error: tr('mensagens pelo escritório desligadas: só funcionam com o Habblaud acessível apenas pelo próprio computador (e sem HABBLAUD_MENSAGENS=0)'),
+          error: tr('mensagens pelo escritório desligadas: só funcionam com o Dissero acessível apenas pelo próprio computador (e sem HABBLAUD_MENSAGENS=0)'),
         });
       } else if (!trusted(req, 'messages')) {
         sendJson(res, 403, { error: denied(req, tr('mensagens só são mandadas pelo próprio computador (http://localhost ou http://127.0.0.1)')) });
@@ -647,7 +706,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
     if (path === '/api/rooms/rename') {
       // Como o personagem: a mesma trava do terminal (bind local + Host local).
       if (method !== 'POST') methodNotAllowed(res, 'POST');
-      else if (!deps.terminal) sendJson(res, 403, { error: tr('renomear salas desligado: só funciona com o Habblaud acessível apenas pelo próprio computador') });
+      else if (!deps.terminal) sendJson(res, 403, { error: tr('renomear salas desligado: só funciona com o Dissero acessível apenas pelo próprio computador') });
       else if (!trusted(req)) sendJson(res, 403, { error: denied(req, tr('renomear salas só pelo próprio computador (http://localhost)')) });
       else
         readJson(req)

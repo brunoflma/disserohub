@@ -1,4 +1,4 @@
-// Servidor do Habblaud: observa as sessões abertas do Claude Code (todas as contas),
+// Servidor do Dissero: observa as sessões abertas do Claude Code (todas as contas),
 // mantém o modelo do escritório e transmite via SSE. Sem dependências de runtime.
 //   npm run dev    -> tsx server/index.ts --dev (Vite em middleware mode, HMR no mesmo servidor)
 //   npm start      -> node dist/server/index.js (serve dist/client)
@@ -12,6 +12,7 @@ import { createRequestGuard, isLoopbackHost } from './http/guard';
 import { createRemoteGate, isRemoteRequest, loadSecret, RemoteSessions, startRemoteListener, type RemoteListener } from './http/remote';
 import { Hub } from './http/sse';
 import { createStaticHandler } from './http/static';
+import { createTlsListener } from './http/tls';
 import { TerminalStreams } from './http/terminal';
 import { createTimelineHandler } from './http/timeline';
 import { TIMELINE_DIR, TimelineRecorder } from './history/timeline';
@@ -21,6 +22,7 @@ import { errMsg, log } from './log';
 import { NameStore } from './model/names';
 import { Office } from './model/office';
 import { RoomAliases } from './model/room-aliases';
+import { ProjectFolders } from './projects/folders';
 import { createPtyRoutes } from './http/pty';
 import { claudeBinFrom, isExecutableFile, loadPty, PtyManager, type ScreenFactory, type SpawnPty } from './pty/manager';
 import { loadHeadlessScreen } from './pty/screen';
@@ -39,7 +41,7 @@ import { CodexHistory } from './sources/codex/history';
 import { CodexSource } from './sources/codex/source';
 import { createBuildReader } from './build';
 import { UpdateChecker } from './updates/checker';
-import { tr } from '../shared/i18n';
+import { setLocale, tr } from '../shared/i18n';
 import { createCliRunner, createOpener, SpawnService } from './spawn/spawn';
 import { runnableClaudeBin } from './claude-bin';
 import { AttachmentStore } from './spawn/attachments';
@@ -50,6 +52,7 @@ import { createWhisperTranscriber, findWhisper } from './dictation/whisper';
 import { DeliveryIndex } from './deliveries/deliveries';
 import { FileFetcher } from './deliveries/fetcher';
 
+setLocale('pt-BR');
 const config = loadConfig();
 const startedAt = Date.now();
 
@@ -68,6 +71,13 @@ names.load();
 // Nomes de sala escolhidos pelo usuário (botão direito > Renomear).
 const roomAliases = new RoomAliases(join(config.dataDir, 'rooms.json'));
 roomAliases.load();
+let projects: ProjectFolders | undefined;
+if (config.terminal && !config.inDocker) {
+  try {
+    projects = new ProjectFolders(join(config.dataDir, 'projects.json'), config.home);
+    projects.load();
+  } catch (error) { log.warn(tr('Cadastro de projetos indisponível: {0}', [errMsg(error)])); projects = undefined; }
+}
 
 // Office, contas e fontes de agentes se referenciam (avisos de mudança / fontes): ligação tardia.
 const late: { office?: Office; agents?: SourceSet; permissions?: PermissionRegistry; messages?: MessageRegistry; ptys?: PtyManager; ptyOff?: string } = {};
@@ -106,15 +116,17 @@ const office = new Office({
 // Fontes de agentes, uma por ferramenta (sources/source.ts): a do Claude Code e, depois dela, a do Codex (quando há
 // pastas do Codex; HABBLAUD_CODEX=0 desliga), com o histórico dela no HistorySet abaixo e as contas registradas por
 // ela mesma (accounts.setProviderAccounts). `codex` também recebe os eventos dos hooks do Codex (CodexLive).
-const claude = new ClaudeWatcher({ accounts, office, inDocker: config.inDocker });
+const sourceOptions = { watch: process.env.HABBLAUD_FS_WATCH !== '0', pollMs: Number(process.env.HABBLAUD_SOURCE_POLL_MS) || 1000 };
+const claude = new ClaudeWatcher({ accounts, office, inDocker: config.inDocker, ...sourceOptions, asyncSubagents: process.env.HABBLAUD_ASYNC_SUBAGENTS === '1' });
 const agents = new SourceSet([claude]);
 const codexDirs = config.codex ? discoverCodexDirs(process.env, config.home) : [];
-const codex = codexDirs.length ? new CodexSource({ accounts, office, dirs: codexDirs, env: process.env, home: config.home }) : undefined;
+const codex = codexDirs.length ? new CodexSource({ accounts, office, dirs: codexDirs, env: process.env, home: config.home, ...sourceOptions }) : undefined;
 if (codex) agents.add(codex);
 // Eventos dos hooks do Codex (POST /api/codex/events, mod/habblaud-codex/hook.mjs): vão para a fonte do Codex ao vivo
 // (CodexLive); sem ela (nenhuma pasta do Codex ou HABBLAUD_CODEX=0) a rota responde {ok: false}.
 const codexLive: CodexLive | undefined = codex;
 late.office = office;
+for (const project of projects?.entries() ?? []) office.registerProject(project.path, project.createdAt);
 late.agents = agents;
 // Página que pode responder pelo escritório: Host local na porta local; na remota, só com permissions liberado.
 const hub = new Hub(office, {
@@ -296,6 +308,7 @@ const api = createApiHandler({
   messages: messages ? createMessageRoutes(messages) : undefined,
   pty: ptys ? createPtyRoutes(ptys) : undefined,
   spawn,
+  projects,
   attachments,
   dictation,
   deliveries,
@@ -344,7 +357,7 @@ if (config.dev) {
 // Host/Origin/Content-Type: barra DNS rebinding e CSRF antes de qualquer rota (inclusive o Vite).
 const guard = createRequestGuard({ allowedHosts: config.allowedHosts });
 
-server.on('request', (req, res) => {
+const handleRequest: http.RequestListener = (req, res) => {
   const url = parseUrl(req);
   try {
     if (guard(req, res)) return;
@@ -354,7 +367,19 @@ server.on('request', (req, res) => {
     if (!res.headersSent) sendJson(res, 500, { error: tr('erro interno') });
     else res.destroy();
   }
-});
+};
+server.on('request', handleRequest);
+
+// Both listeners share the same routes, SSE hub and request guard. Bind HTTPS to
+// the configured interface too, so local-only installations stay local-only.
+const secure = createTlsListener(process.env, handleRequest);
+if (secure) {
+  secure.server.on('error', (err) => {
+    log.error(`Erro no servidor HTTPS: ${errMsg(err)}`);
+    process.exit(1);
+  });
+  secure.server.listen(secure.port, config.host, () => log.info(`HTTPS em https://${config.host}:${secure.port}`));
+}
 
 server.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') log.error(tr('A porta {0} já está em uso (defina HABBLAUD_PORT para usar outra).', [config.port]));
@@ -405,7 +430,7 @@ if (config.remote) {
 
 server.listen(config.port, config.host, () => {
   const host = config.host === '0.0.0.0' || config.host === '::' ? 'localhost' : config.host;
-  log.info(tr('🏢 Habblaud {0}{1}{2} em http://{3}:{4}', [config.version, config.dev ? ' (dev)' : '', config.inDocker ? ' (docker)' : '', host, config.port]));
+  log.info(tr('🏢 Dissero {0}{1}{2} em http://{3}:{4}', [config.version, config.dev ? ' (dev)' : '', config.inDocker ? ' (docker)' : '', host, config.port]));
   const list = accounts.entries();
   if (!list.length) log.warn(tr('Nenhuma pasta do Claude Code encontrada (defina HABBLAUD_CLAUDE_DIRS).'));
   for (const dir of codexDirsRefused(process.env, config.home)) {
@@ -481,8 +506,16 @@ function shutdown(signal: string): void {
   names.flush();
   void closeVite?.();
   remoteListener?.close();
-  server.close(() => process.exit(0));
+  const listeners = secure ? [server, secure.server] : [server];
+  let closing = listeners.length;
+  for (const listener of listeners) listener.close(() => { if (--closing === 0) process.exit(0); });
   setTimeout(() => process.exit(0), 1_500).unref();
 }
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
+// Native Windows supervision uses IPC to allow state to flush before a restart.
+process.on('message', (message: unknown) => {
+  if (message && typeof message === 'object' && 'type' in message && message.type === 'habblaud:shutdown') shutdown('supervisor');
+});
+// The native supervisor uses IPC. Close listeners if it disappears unexpectedly.
+if (process.connected) process.on('disconnect', () => shutdown('supervisor_disconnected'));

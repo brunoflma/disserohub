@@ -6,7 +6,7 @@ import type { AgentInfo, Notice } from '../../shared/types';
 import { AccountsService } from '../accounts/service';
 import { setQuiet } from '../log';
 import { NameStore } from '../model/names';
-import { Office } from '../model/office';
+import { IDLE_PRESENCE_MS, Office } from '../model/office';
 import { appendLines, L, tempDir, writeLines } from '../test/fixtures';
 import { ClaudeWatcher, encodeCwd } from './watcher';
 
@@ -21,6 +21,7 @@ function setup(opts: { tailBytes?: number } = {}) {
   mkdirSync(join(dir, 'sessions'), { recursive: true });
   mkdirSync(join(dir, 'projects'), { recursive: true });
   let clock = Date.now();
+  let registryRevision = 0;
   const now = () => clock;
   const late: { office?: Office } = {};
   const accounts = new AccountsService({
@@ -55,10 +56,15 @@ function setup(opts: { tailBytes?: number } = {}) {
     now,
     openSession(pid: number, sessionId: string, extra: Record<string, unknown> = {}) {
       alive.add(pid);
+      const registryFile = join(dir, 'sessions', `${pid}.json`);
       writeFileSync(
-        join(dir, 'sessions', `${pid}.json`),
+        registryFile,
         JSON.stringify({ pid, sessionId, cwd: CWD, startedAt: clock - 60_000, kind: 'interactive', status: 'busy', ...extra }),
       );
+      // Separate successive writes even on filesystems whose timestamp resolution
+      // would otherwise hide same-size changes from the registry cache.
+      const changedAt = new Date(clock + ++registryRevision);
+      utimesSync(registryFile, changedAt, changedAt);
     },
     closeSession(pid: number) {
       alive.delete(pid);
@@ -101,6 +107,60 @@ describe('ClaudeWatcher', () => {
   afterEach(() => {
     c.watcher.stop();
     c.tmp.cleanup();
+  });
+
+  it('idle antigo no boot não aparece apesar do PID vivo; updatedAt não renova e trabalho novo reaparece', () => {
+    const old = c.now() - 3 * 3600_000;
+    const path = c.transcript('old');
+    writeLines(path, [L.prompt('Conversa antiga', { at: old })]);
+    c.openSession(100, 'old', { status: 'idle', startedAt: old, statusUpdatedAt: old, updatedAt: c.now() });
+    c.watcher.boot();
+    expect(c.agents()).toEqual([]);
+    expect(c.office.get('.claude:100')?.statusSince).toBe(old);
+    expect(c.office.commit().snapshot.rooms).toEqual([]);
+    c.advance(60_000);
+    c.openSession(100, 'old', { status: 'idle', startedAt: old, statusUpdatedAt: old, updatedAt: c.now() });
+    c.poll();
+    expect(c.agents()).toEqual([]);
+    appendLines(path, [L.prompt('Trabalho novo', { at: c.now() })]);
+    c.openSession(100, 'old', { status: 'busy', startedAt: old, statusUpdatedAt: c.now() });
+    c.poll();
+    expect(c.agents()[0]).toMatchObject({ id: '.claude:100', status: 'working' });
+  });
+
+  it('idle recente tem apenas o prazo restante após o boot, sem renovar em cada polling', () => {
+    const old = c.now() - IDLE_PRESENCE_MS + 60_000;
+    writeLines(c.transcript('recent'), [L.prompt('Conversa', { at: old })]);
+    c.openSession(100, 'recent', { status: 'idle', startedAt: old - 60_000, statusUpdatedAt: old, updatedAt: c.now() });
+    c.watcher.boot();
+    expect(c.agents()[0]?.statusSince).toBe(old);
+    c.advance(59_999);
+    c.poll();
+    expect(c.agents()).toHaveLength(1);
+    c.advance(1);
+    c.poll();
+    expect(c.agents()).toEqual([]);
+  });
+
+  it('pausa ao vivo usa o instante observado, mesmo com statusUpdatedAt e transcript antigos', () => {
+    const old = c.now() - 3 * 3600_000;
+    writeLines(c.transcript('live'), [L.prompt('Trabalho', { at: old })]);
+    c.openSession(100, 'live', { status: 'busy', startedAt: old, statusUpdatedAt: old });
+    c.watcher.boot();
+    expect(c.agents()).toHaveLength(1);
+    c.openSession(100, 'live', { status: 'idle', startedAt: old, statusUpdatedAt: old });
+    c.poll();
+    const pausedAt = c.now();
+    expect(c.agents()[0]?.statusSince).toBe(pausedAt);
+    c.advance(3_000);
+    c.poll();
+    expect(c.agents()).toHaveLength(1);
+    c.advance(IDLE_PRESENCE_MS - 3_001);
+    c.poll();
+    expect(c.agents()).toHaveLength(1);
+    c.advance(1);
+    c.poll();
+    expect(c.agents()).toEqual([]);
   });
 
   function bootWithSession(pid = 100, sid = 'sess-a') {
@@ -309,6 +369,61 @@ describe('ClaudeWatcher', () => {
     expect(c.agent('sess-a:e1')!.status).toBe('done');
   });
 
+  it('sub concluído não retorna por texto final atrasado, mas aceita uma tarefa realmente nova', () => {
+    bootWithSession();
+    const initialAt = c.now();
+    const path = c.subFile('sess-a', 'late', { agentType: 'Plan', description: 'Planejar' }, [
+      L.prompt('Planeje', { agentId: 'late', at: c.now() }),
+      L.assistant([L.text('Pronto.')], { agentId: 'late', at: c.now(), stop: 'end_turn' }),
+    ]);
+    c.poll();
+    c.advance(6_000);
+    c.poll();
+    expect(c.agent('sess-a:late')?.status).toBe('done');
+    c.advance(4_000);
+    appendLines(path, [L.assistant([L.text('Resumo final atrasado.')], { agentId: 'late', at: c.now(), stop: 'end_turn' })]);
+    c.poll();
+    expect(c.agent('sess-a:late')?.status).toBe('done');
+    c.advance(30_000);
+    c.poll();
+    c.poll();
+    expect(c.agent('sess-a:late')).toBeUndefined();
+    appendLines(path, [L.assistant([L.text('Registro tardio da entrega.')], { agentId: 'late', at: c.now(), stop: 'end_turn' })]);
+    c.advance(6_000);
+    c.poll();
+    expect(c.agent('sess-a:late')).toBeUndefined();
+    // Histórico repetido tem um prompt antigo, mas não constitui outra tarefa.
+    appendLines(path, [L.prompt('Planeje', { agentId: 'late', at: initialAt })]);
+    c.advance(6_000);
+    c.poll();
+    expect(c.agent('sess-a:late')).toBeUndefined();
+    appendLines(path, [
+      L.prompt('Agora revise o plano', { agentId: 'late', at: c.now() }),
+      L.assistant([L.tool('new', 'Read', { file_path: '/plano.md' })], { agentId: 'late', at: c.now() }),
+    ]);
+    c.advance(6_000);
+    c.poll();
+    expect(c.agent('sess-a:late')?.status).toBe('working');
+  });
+
+  it('sub concluído ignora resultados atrasados, mas reativa um novo pedido durante a entrega', () => {
+    bootWithSession();
+    const path = c.subFile('sess-a', 'resume', { agentType: 'Plan' }, [
+      L.prompt('Planeje', { agentId: 'resume', at: c.now() }),
+      L.assistant([L.text('Pronto.')], { agentId: 'resume', at: c.now(), stop: 'end_turn' }),
+    ]);
+    c.poll();
+    c.advance(6_000);
+    c.poll();
+    c.advance(4_000);
+    appendLines(path, [L.result('old', 'resultado tardio', { agentId: 'resume', at: c.now() })]);
+    c.poll();
+    expect(c.agent('sess-a:resume')?.status).toBe('done');
+    appendLines(path, [L.prompt('Mais uma etapa', { agentId: 'resume', at: c.now() })]);
+    c.poll();
+    expect(c.agent('sess-a:resume')?.status).toBe('working');
+  });
+
   it('agentes de workflow: entram pela pasta workflows/ e saem com a notificação do workflow', () => {
     bootWithSession();
     appendLines(c.transcript('sess-a'), [
@@ -461,7 +576,7 @@ describe('ClaudeWatcher', () => {
     expect(a.role).toBe('Agente frinus');
     const texts = c.notices.map((n) => n.text);
     expect(texts).toContain('🏗️ Nova sala: loja');
-    expect(texts).toContain(`👋 ${a.name} chegou em loja (Conta A)`);
+    expect(texts).toContain(`👋 ${a.name} chegou em loja (Claude)`);
   });
 });
 

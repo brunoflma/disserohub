@@ -3,6 +3,7 @@
 import { DEFAULT_SOUND_SETTINGS, sanitizeSoundSettings, type SoundSettings } from '../audio/scheduler';
 import type { DaylightMode, WorldOptions } from '../world/api';
 import { DEFAULT_WORLD_OPTIONS } from '../world/api';
+import { ZOOM_MAX } from '../world/constants';
 
 export const PREFS_KEY = 'habblaud:prefs';
 
@@ -12,7 +13,7 @@ export interface UiPrefs {
   liveliness: WorldOptions['liveliness'];
   /** Ciclo dia/noite: automático (hora local), sempre dia ou sempre noite. */
   daylight: DaylightMode;
-  theme: NonNullable<WorldOptions['theme']>;
+  theme: Exclude<NonNullable<WorldOptions['theme']>, 'legal'>;
   /** Sons sintetizados (interruptor geral; desligado por padrão). */
   sound: boolean;
   /** Volume mestre e categorias dos sons. */
@@ -21,6 +22,12 @@ export interface UiPrefs {
   browserNotifications: boolean;
   sidebarOpen: boolean;
   feedOpen: boolean;
+  feedMode: 'important' | 'all';
+  sidebarWidth: number;
+  drawerWidth: number;
+  feedHeight: number;
+  economy: boolean;
+  cameraView: { x: number; y: number; zoom: number; cols: number; width: number; height: number; mode: 'overview' | 'offices' | 'manual' } | null;
   /** Contas ocultas na barra lateral (AccountInfo.id). */
   hiddenAccounts: string[];
 }
@@ -36,6 +43,12 @@ export const DEFAULT_PREFS: UiPrefs = {
   browserNotifications: false,
   sidebarOpen: true,
   feedOpen: true,
+  feedMode: 'important',
+  sidebarWidth: 304,
+  drawerWidth: 380,
+  feedHeight: 200,
+  economy: false,
+  cameraView: null,
   hiddenAccounts: [],
 };
 
@@ -44,6 +57,15 @@ type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
 const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T =>
   typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
 const bool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
+const dimension = (v: unknown, fallback: number, min: number, max: number): number => typeof v === 'number' && Number.isFinite(v) ? Math.round(Math.max(min, Math.min(max, v))) : fallback;
+
+function cameraView(v: unknown): UiPrefs['cameraView'] {
+  if (!v || typeof v !== 'object') return null;
+  const s = v as Record<string, unknown>;
+  if (!['x', 'y', 'zoom', 'cols', 'width', 'height'].every((key) => typeof s[key] === 'number' && Number.isFinite(s[key]))) return null;
+  if ((s.zoom as number) < 0.25 || (s.zoom as number) > ZOOM_MAX || (s.cols as number) < 2 || (s.cols as number) > 10000) return null;
+  return { x: s.x as number, y: s.y as number, zoom: s.zoom as number, cols: s.cols as number, width: s.width as number, height: s.height as number, mode: oneOf(s.mode, ['overview', 'offices', 'manual'] as const, 'offices') };
+}
 
 /** Valida campo a campo: valores desconhecidos ou corrompidos caem no padrão. */
 export function sanitizePrefs(raw: unknown): UiPrefs {
@@ -55,12 +77,18 @@ export function sanitizePrefs(raw: unknown): UiPrefs {
     liveliness: oneOf(o.liveliness, ['calm', 'normal', 'lively'] as const, d.liveliness),
     // preferências antigas: o interruptor "dia e noite" desligado vira "sempre dia"
     daylight: oneOf(o.daylight, ['auto', 'day', 'night'] as const, o.dayNight === false ? 'day' : d.daylight),
-    theme: oneOf(o.theme, ['auto', 'none', 'christmas', 'halloween'] as const, d.theme),
+    theme: oneOf(o.theme === 'legal' ? 'none' : o.theme, ['auto', 'none', 'christmas', 'halloween'] as const, d.theme),
     sound: bool(o.sound, d.sound),
     sounds: sanitizeSoundSettings(o.sounds),
     browserNotifications: bool(o.browserNotifications, d.browserNotifications),
     sidebarOpen: bool(o.sidebarOpen, d.sidebarOpen),
     feedOpen: bool(o.feedOpen, d.feedOpen),
+    feedMode: oneOf(o.feedMode, ['important', 'all'] as const, d.feedMode),
+    sidebarWidth: dimension(o.sidebarWidth, d.sidebarWidth, 240, 420),
+    drawerWidth: dimension(o.drawerWidth, d.drawerWidth, 300, 520),
+    feedHeight: dimension(o.feedHeight, d.feedHeight, 120, 360),
+    economy: bool(o.economy, d.economy),
+    cameraView: cameraView(o.cameraView),
     hiddenAccounts: Array.isArray(o.hiddenAccounts) ? o.hiddenAccounts.filter((x): x is string => typeof x === 'string').slice(0, 20) : [],
   };
 }
@@ -86,7 +114,7 @@ export function savePrefs(storage: StorageLike | null, prefs: UiPrefs): void {
 
 /** Parte das preferências que o mundo (canvas) consome. */
 export function worldOptionsFrom(p: UiPrefs): Partial<WorldOptions> {
-  return { showNames: p.showNames, bubbles: p.bubbles, liveliness: p.liveliness, dayNight: p.daylight !== 'day', daylight: p.daylight, theme: p.theme };
+  return { showNames: p.showNames, bubbles: p.bubbles, liveliness: p.liveliness, dayNight: p.daylight !== 'day', daylight: p.daylight, theme: p.theme, economy: p.economy, legalOffice: true };
 }
 
 /** localStorage com proteção contra navegadores que lançam exceção ao acessá-lo. */

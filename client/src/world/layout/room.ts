@@ -24,8 +24,7 @@ export interface RoomInput {
 
 const PLANTS_TALL = ['palm', 'ficus', 'monstera', 'bonsai'] as const;
 const PLANTS_SMALL = ['fern', 'succulent', 'flower'] as const;
-const POSTERS = ['code', 'coffee', 'rocket', 'cat', 'bug', 'ship_it'] as const;
-const BEANBAGS = ['red', 'blue', 'yellow', 'green'] as const;
+const POSTERS = ['law_justice', 'law_charter', 'law_columns'] as const;
 
 /** Canto de reunião (assentos extras para subagentes). */
 export type MeetingStyle = 'table' | 'round' | 'lounge';
@@ -85,7 +84,7 @@ export function layoutProjectRoom(room: RoomInput, theme: RoomTheme): AreaLayout
   const fdir = (d: Dir): Dir => (mir && (d === 'left' || d === 'right') ? (d === 'left' ? 'right' : 'left') : d);
   const fdx = (dx: number | undefined) => (dx === undefined ? undefined : mir ? -dx : dx);
   const furn = (kind: FurnitureKind, lx: number, ly: number, variant?: string, o: { dx?: number; dy?: number; order?: number; seat?: string } = {}) =>
-    b.furn(kind, fx(lx, FURNITURE[kind].footprint.w), ly, variant, { ...o, dx: fdx(o.dx) });
+    b.furn(kind, fx(lx, FURNITURE[kind].footprint.w), ly, variant ?? (kind === 'bookshelf' || kind === 'meeting_table' ? 'legal' : undefined), { ...o, dx: fdx(o.dx) });
   const spot = (kind: SpotKind, lx: number, ly: number, dir: Dir, o: SpotOpts = {}): SpotDef => b.spot(kind, fx(lx), ly, fdir(dir), { ...o, dx: fdx(o.dx) });
   /** Assento; `dirVariant` = a variante do móvel é a própria direção (poltrona, cadeira de café). */
   const seat = (kind: SpotKind, fk: FurnitureKind, lx: number, ly: number, dir: Dir, variant?: string, o: SpotOpts & { order?: number } = {}, dirVariant = false): SpotDef =>
@@ -167,16 +166,15 @@ export function layoutProjectRoom(room: RoomInput, theme: RoomTheme): AreaLayout
     furn('cafe_table', 11, 7, undefined, { order: 0.46 });
     seat('stool', 'stool', 10, 7, 'right', undefined, { order: 0.67 });
     seat('stool', 'stool', 12, 7, 'left', undefined, { order: 0.68 });
-    furn('plant_small', 12, 5, pick(PLANTS_SMALL), { order: 0.47 });
   } else {
     // recanto com poltronas e puffs em volta de uma mesa de centro (sem mesa de reunião)
     rug(9.6, 3.7, 4.8, 4.6, shade(theme.carpet2, 0.25), room.seed + 2);
     furn('coffee_table', 10, 5, undefined, { order: 0.45 });
     seat('nook', 'armchair', 9, 5, 'right', undefined, { order: 0.65 }, true);
     seat('nook', 'armchair', 12, 5, 'left', undefined, { order: 0.66 }, true);
-    seat('nook', 'beanbag', 10, 7, 'up', pick(BEANBAGS), { order: 0.67 });
-    seat('nook', 'beanbag', 11, 7, 'up', pick(BEANBAGS), { order: 0.68 });
-    seat('nook', 'beanbag', 11, 3, 'down', pick(BEANBAGS), { order: 0.69 });
+    seat('nook', 'armchair', 10, 7, 'up', undefined, { order: 0.67 }, true);
+    seat('nook', 'armchair', 11, 7, 'up', undefined, { order: 0.68 }, true);
+    seat('nook', 'armchair', 11, 3, 'down', undefined, { order: 0.69 }, true);
   }
 
   // ---- apoio: estante na parede norte (sem cobrir quadro, placa ou janela) e coluna junto à parede
@@ -199,7 +197,7 @@ export function layoutProjectRoom(room: RoomInput, theme: RoomTheme): AreaLayout
   } else {
     furn('floor_lamp', 14, 4, undefined, { order: 0.3 });
     furn('filing_cabinet', 14, 6, undefined, { order: 0.32 });
-    furn('plant_tall', 14, 8, pick(PLANTS_TALL), { order: 0.34 });
+    furn('floor_lamp', 14, 8, undefined, { order: 0.34 });
   }
 
   // ---- cantos da parte de baixo (linhas 9–10; a passagem da porta, colunas 6–9, fica livre)
@@ -214,9 +212,9 @@ export function layoutProjectRoom(room: RoomInput, theme: RoomTheme): AreaLayout
       case 'rest': {
         // canto de descanso: tapete, dois puffs (também servem de lugar extra) e plantas
         rug(x0 + 0.5, 8.85, 4, 2, shade(theme.carpet, 0.35), room.seed + 3);
-        seat('nook', 'beanbag', x0 + 1, 10, 'up', pick(BEANBAGS), { order: o + 0.4 });
-        seat('nook', 'beanbag', x0 + 3, 10, 'up', pick(BEANBAGS), { order: o + 0.41 });
-        furn('plant_small', x0 + 2, 10, pick(PLANTS_SMALL), { order: o });
+        seat('nook', 'armchair', x0 + 1, 10, 'up', undefined, { order: o + 0.4 }, true);
+        seat('nook', 'armchair', x0 + 3, 10, 'up', undefined, { order: o + 0.41 }, true);
+        furn('plant_small', where === 'left' ? 1 : 14, 9, pick(PLANTS_SMALL), { order: o });
         furn('plant_tall', where === 'left' ? x0 : x0 + 4, 10, pick(PLANTS_TALL), { order: o + 0.01 });
         return;
       }
@@ -231,25 +229,25 @@ export function layoutProjectRoom(room: RoomInput, theme: RoomTheme): AreaLayout
       }
       case 'green': {
         // cantinho verde com luminária e uma poltrona de leitura
-        furn('plant_tall', x0, 10, pick(PLANTS_TALL), { order: o });
+        const plantX = where === 'left' ? 1 : 14;
+        furn('plant_tall', plantX, 10, pick(PLANTS_TALL), { order: o });
         furn('floor_lamp', x0 + 1, 10, undefined, { order: o + 0.01 });
         seat('nook', 'armchair', x0 + 2, 10, 'up', undefined, { order: o + 0.4 }, true);
-        furn('plant_small', x0 + 3, 10, pick(PLANTS_SMALL), { order: o + 0.02 });
-        furn('plant_tall', x0 + 4, 10, pick(PLANTS_TALL), { order: o + 0.03 });
+        furn('plant_small', plantX, 9, pick(PLANTS_SMALL), { order: o + 0.02 });
         return;
       }
       case 'standdesk': {
         // mesa de pé com notebook (lugar de trabalho em pé, de frente para a câmera)
         furn('cafe_table', x0 + 2, 10, undefined, { order: o });
         spot('stand', x0 + 2, 9, 'down', { dy: -1 });
-        furn('plant_small', x0 + 4, 10, pick(PLANTS_SMALL), { order: o + 0.01 });
+        furn('plant_small', where === 'left' ? 1 : 14, 9, pick(PLANTS_SMALL), { order: o + 0.01 });
         furn('trash_bin', x0, 10, undefined, { order: o + 0.02 });
         return;
       }
       case 'stands': {
         // pontos em pé junto ao quadro móvel/estante baixa
         furn('filing_cabinet', x0 + 4, 10, undefined, { order: o });
-        furn('plant_small', x0, 10, pick(PLANTS_SMALL), { order: o + 0.01 });
+        furn('plant_small', where === 'left' ? 1 : 14, 9, pick(PLANTS_SMALL), { order: o + 0.01 });
         spot('stand', x0 + 1, 9, 'up', { dy: -2 });
         spot('stand', x0 + 2, 9, 'up', { dy: -2 });
         return;

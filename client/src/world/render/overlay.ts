@@ -5,6 +5,8 @@
 // Os itens são POSICIONADOS em ordem decrescente de prioridade (quem chega depois desvia, vira
 // só o ícone ou é descartado) e DESENHADOS em ordem crescente (o mais importante fica por cima).
 import { TILE } from '../../art/api';
+import { PROVIDER_LOGO } from '../../brand';
+import { activityDisplayText } from '../../local/feed-policy';
 import type { WorldOptions } from '../api';
 import type { Camera } from '../camera';
 import { COL_W, CORRIDOR_Y, SOUTH_Y } from '../constants';
@@ -23,7 +25,6 @@ const LABEL_FONT = `600 10.5px ${UI_FONT}`;
 const BUBBLE_FONT = `500 11.5px ${UI_FONT}`;
 const SAY_FONT = `500 10.5px ${UI_FONT}`;
 const FLOAT_FONT = `800 12px ${UI_FONT}`;
-const CHIP_FONT = `700 8px ${UI_FONT}`;
 const BADGE_FONT = `700 8px ${UI_FONT}`;
 const ROOM_FONT = `700 12px ${UI_FONT}`;
 const CORE_FONT = `600 11px ${UI_FONT}`;
@@ -50,7 +51,7 @@ const CORE_NAMES: Record<string, string> = {
   'core:recepcao': tr('Recepção'),
   'core:banheiros': tr('Banheiros'),
   'core:copa': tr('Copa'),
-  'core:lounge': tr('Lounge'),
+  'core:lounge': tr('Sala de Convivência'),
 };
 
 /** 'shell' = espera de shell: balão escuro de terminal com texto verde. 'say' = fala das rodas (papo, torcida, apostas). */
@@ -103,25 +104,9 @@ interface Label {
 
 type Item = Bubble | Label;
 
-/** Luminância relativa de uma cor hex (0..1). */
 /** Fundo do chip vazado das contas do Codex (o mesmo dos painéis). */
 const CODEX_CHIP_BG = '#161b26';
-/** Selo "CODEX" das etiquetas: discreto (vidro claro), sem a cor de ninguém. */
-const CODEX_BADGE = 'CODEX';
-
-/** Octógono "em degrau" (um quadrado de cantos cortados, como um pixel arredondado). */
-function steppedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, s: number): void {
-  ctx.beginPath();
-  ctx.moveTo(x + s, y);
-  ctx.lineTo(x + w - s, y);
-  ctx.lineTo(x + w, y + s);
-  ctx.lineTo(x + w, y + h - s);
-  ctx.lineTo(x + w - s, y + h);
-  ctx.lineTo(x + s, y + h);
-  ctx.lineTo(x, y + h - s);
-  ctx.lineTo(x, y + s);
-  ctx.closePath();
-}
+const CODEX_BADGE = 'CHATGPT';
 
 /**
  * Bolinha de uma conta (placas e pílulas das salas): cheia no Claude Code; vazada (anel na cor da conta) no Codex,
@@ -142,13 +127,6 @@ function accountDot(ctx: CanvasRenderingContext2D, x: number, y: number, r: numb
   }
   ctx.fillStyle = acc.color;
   ctx.fill();
-}
-
-function luminance(hex: string): number {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
-  if (!m) return 0.5;
-  const n = parseInt(m[1], 16);
-  return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
 }
 
 /** Altura (px de mundo) ocupada pelos ícones sobre a cabeça: balões e etiquetas sobem para não cobri-los. */
@@ -183,6 +161,8 @@ export function rationBubbles(items: readonly { room: string; prio: number; chan
 }
 
 export class Overlay {
+  private readonly logos: Record<'claude' | 'codex', HTMLImageElement>;
+  private readonly logoRetryAt = { claude: 0, codex: 0 };
   private widths = new Map<string, number>();
   private fitted = new Map<string, string>();
   private placed: number[] = [];
@@ -205,7 +185,15 @@ export class Overlay {
     private readonly sim: Sim,
     private readonly renderer: Renderer,
     private readonly camera: Camera,
-  ) {}
+  ) {
+    const loadLogo = (src: string): HTMLImageElement => {
+      const img = new Image(128, 128);
+      img.decoding = 'sync';
+      img.src = src;
+      return img;
+    };
+    this.logos = { claude: loadLogo(PROVIDER_LOGO.claude), codex: loadLogo(PROVIDER_LOGO.codex) };
+  }
 
   /** Descarta medições (ex.: depois que uma fonte carregou). */
   resetCaches(): void {
@@ -417,7 +405,7 @@ export class Overlay {
       const anim = room ? buildAnim(room.phase, room.progress(now)) : null;
       // texto da placa quando ela fica grande o bastante para ler; senão, o nome flutuante
       const rect = this.renderer.signRect(vis);
-      const text = room ? room.info.name : vis.id === 'core:recepcao' ? 'Habblaud' : null;
+      const text = room ? room.info.name : vis.id === 'core:recepcao' ? 'Dissero' : null;
       const readable = !!rect && rect.h * zoom >= SIGN_MIN_PX;
       if (readable && rect && text && (!anim || anim.sign >= 1)) {
         const ax = this.sx(rect.x);
@@ -634,12 +622,13 @@ export class Overlay {
     }
     if (!act || ch.leaving) return null;
     const age = now - ch.activityChangedAt;
-    if (selected) return this.takeBubble(ch, head, act.icon, act.text, 'info', 80, 1, ch.activityChangedAt);
-    if (hovered) return this.takeBubble(ch, head, act.icon, act.text, 'info', 75, 1, ch.activityChangedAt);
-    if (opts.bubbles === 'all' && ch.mode === 'work') return this.takeBubble(ch, head, act.icon, act.text, 'info', age < RECENT_MS ? 50 : 30, 1, ch.activityChangedAt);
+    const text = activityDisplayText(act);
+    if (selected) return this.takeBubble(ch, head, act.icon, text, 'info', 80, 1, ch.activityChangedAt);
+    if (hovered) return this.takeBubble(ch, head, act.icon, text, 'info', 75, 1, ch.activityChangedAt);
+    if (opts.bubbles === 'all' && ch.mode === 'work') return this.takeBubble(ch, head, act.icon, text, 'info', age < RECENT_MS ? 50 : 30, 1, ch.activityChangedAt);
     if (age < RECENT_MS && ch.activityChangedAt > 0) {
       const a = Math.min(1, age / 150, (RECENT_MS - age) / 500);
-      return this.takeBubble(ch, head, act.icon, act.text, 'info', 50, a, ch.activityChangedAt);
+      return this.takeBubble(ch, head, act.icon, text, 'info', 50, a, ch.activityChangedAt);
     }
     return null;
   }
@@ -864,12 +853,12 @@ export class Overlay {
 
   // =================================================================== etiquetas
 
-  /** Larguras das partes da etiqueta. O selo "CODEX" (como o "SUB") só aparece fora do modo compacto. */
+  /** Larguras das partes da etiqueta. O selo "CHATGPT" (como o "SUB") só aparece fora do modo compacto. */
   private labelWidth(l: Label): { nameW: number; chipW: number; badgeW: number; codexW: number } {
     const ch = l.ch;
     const acc = this.sim.accounts.get(ch.info.account);
     const nameW = this.measure(LABEL_FONT, ch.info.name);
-    const chipW = acc ? 13 : 0;
+    const chipW = acc ? 16 : 0;
     const badgeW = ch.info.kind === 'sub' && !l.compact ? this.measure(BADGE_FONT, 'SUB') + 7 : 0;
     const codexW = ch.info.provider === 'codex' && !l.compact ? this.measure(BADGE_FONT, CODEX_BADGE) + 7 : 0;
     return { nameW, chipW, badgeW, codexW };
@@ -911,31 +900,32 @@ export class Overlay {
     ctx.roundRect(x, y, w, h, 7.5);
     ctx.fill();
     let cx = x + 4;
-    if (acc && codex) {
-      // Codex: chip vazado de cantos em degrau (fundo escuro, borda e letra na cor da conta), como nos painéis.
-      steppedRect(ctx, cx, y + h / 2 - 5, 10, 10, 2);
+    if (acc) {
+      // As mesmas marcas e cantos arredondados dos painéis, também para subagentes.
+      const top = y + h / 2 - 6;
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(cx + 0.5, top + 0.5, 12, 12, 3);
       ctx.fillStyle = CODEX_CHIP_BG;
       ctx.fill();
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 1;
       ctx.strokeStyle = acc.color;
-      steppedRect(ctx, cx + 0.75, y + h / 2 - 4.25, 8.5, 8.5, 1.6);
       ctx.stroke();
-      ctx.font = CHIP_FONT;
-      ctx.textAlign = 'center';
-      ctx.fillStyle = acc.color;
-      ctx.fillText(acc.short.slice(0, 1), cx + 5, y + h / 2 + 0.5);
-      ctx.textAlign = 'left';
-      cx += chipW;
-    } else if (acc) {
-      ctx.beginPath();
-      ctx.arc(cx + 5, y + h / 2, 5, 0, Math.PI * 2);
-      ctx.fillStyle = acc.color;
-      ctx.fill();
-      ctx.font = CHIP_FONT;
-      ctx.textAlign = 'center';
-      ctx.fillStyle = luminance(acc.color) > 0.62 ? '#1d2330' : '#ffffff';
-      ctx.fillText(acc.short.slice(0, 1), cx + 5, y + h / 2 + 0.5);
-      ctx.textAlign = 'left';
+      const provider = codex ? 'codex' : 'claude';
+      const logo = this.logos[provider];
+      if (logo.complete && logo.naturalWidth === 0) {
+        // Uma falha temporária do servidor não deixa o selo vazio até recarregar a página.
+        const now = performance.now();
+        if (now >= this.logoRetryAt[provider]) {
+          this.logoRetryAt[provider] = now + 10_000;
+          logo.src = PROVIDER_LOGO[provider];
+        }
+      }
+      if (logo.complete && logo.naturalWidth > 0) {
+        ctx.imageSmoothingEnabled = codex;
+        ctx.drawImage(logo, cx + 2, top + 2, 9, 9);
+      }
+      ctx.restore();
       cx += chipW;
     }
     ctx.font = LABEL_FONT;

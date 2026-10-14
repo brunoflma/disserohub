@@ -12,7 +12,7 @@ import { animScale } from '../world/playback';
 import type { UiComponent, UiContext } from './context';
 import { h, iconButton, setAttr, setHidden, setStyleVar, setText, setTitle } from './dom';
 import { formatClock } from './format';
-import { pixelIcon } from './icons';
+import { lineIcon } from './icons';
 import { intlLocale, tr } from '../../../shared/i18n';
 
 export const SPEEDS = [60, 180, 600] as const;
@@ -27,20 +27,10 @@ const STEP_S = 60;
 
 export const TIMELAPSE_ICONS = {
   // Relógio com a seta de voltar no tempo.
-  timelapse: pixelIcon([
-    '....#####..',
-    '..##.....#.',
-    '##.#......#',
-    '.###..#...#',
-    '..##..#...#',
-    '......###.#',
-    '#.........#',
-    '.#.......#.',
-    '..#######..',
-  ]),
-  play: pixelIcon(['##......', '####....', '######..', '########', '######..', '####....', '##......']),
-  pause: pixelIcon(['###..###', '###..###', '###..###', '###..###', '###..###', '###..###', '###..###']),
-  peak: pixelIcon(['#####', '.###.', '..#..']),
+  timelapse: lineIcon('<path d="M3 10a9 9 0 1 1 1.5 7M3 4v6h6m3-3v5l3 2"/>'),
+  play: lineIcon('<path d="m8 5 11 7-11 7z"/>'),
+  pause: lineIcon('<path d="M8 5v14M16 5v14"/>'),
+  peak: lineIcon('<path d="m6 9 6 6 6-6"/>'),
 };
 
 const dayFmt = new Intl.DateTimeFormat(intlLocale(), { weekday: 'short', day: 'numeric', month: 'short' });
@@ -261,7 +251,7 @@ export class TimelapsePlayer implements UiComponent {
       if (!r.days.length) {
         this.status = 'empty';
         this.message = r.recording
-          ? tr('Nada gravado ainda: o Habblaud grava o escritório enquanto está ligado. Volte daqui a pouco.')
+          ? tr('Nada gravado ainda: o Dissero grava o escritório enquanto está ligado. Volte daqui a pouco.')
           : tr('A gravação está desligada neste servidor (HABBLAUD_TIMELINE=0) e não há dias gravados.');
         this.ctx.invalidate();
         return;

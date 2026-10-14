@@ -28,7 +28,7 @@ export class PtyPane {
     this.term = new Terminal({
       cursorBlink: true,
       fontFamily: "'Cascadia Mono', Consolas, Menlo, monospace",
-      fontSize: 13,
+      fontSize: 15,
       scrollback: 5000,
       theme: { background: '#0a0c12', foreground: '#d5dceb', cursor: '#ffb547', selectionBackground: '#3a4a6b' },
     });

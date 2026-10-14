@@ -187,8 +187,11 @@ export type FurnitureKind =
   // --- banheiro
   | 'toilet_stall' // 2x2 cabine com vaso. Personagem entra pela porta (lado SUL) e some. front = divisória/porta. state 0 = livre (porta entreaberta), 1 = ocupada (porta fechada, indicador vermelho).
   | 'sink' // 1x1 pia com gabinete (encostada na parede norte; use 'mirror' na parede acima).
+  | 'washroom_vanity' // 3x1 bancada com espelho, cuba e produtos de higiene.
+  | 'hygiene_cabinet' // 2x1 armário de toalhas e insumos.
   // --- recepção
   | 'reception_desk' // 3x1 balcão de recepção.
+  | 'magazine_rack' // 1x1 expositor de publicações para a área de espera.
   | 'bench'; // 2x1 banco de espera (assento, olhando para baixo).
 
 export interface FurnitureDef {
@@ -217,11 +220,11 @@ export interface FurnitureDef {
  * Ordenação de profundidade: por y da âncora no mundo (maior y = desenhado depois).
  */
 export const FURNITURE: Readonly<Record<FurnitureKind, FurnitureDef>> = {
-  desk: { mount: 'floor', footprint: { w: 2, h: 1 }, blocks: true, variants: ['wood', 'white', 'dark'] },
-  desk_back: { mount: 'floor', footprint: { w: 2, h: 1 }, blocks: true, variants: ['wood', 'white', 'dark'] },
+  desk: { mount: 'floor', footprint: { w: 2, h: 1 }, blocks: true, variants: ['wood', 'white', 'dark', 'legal'] },
+  desk_back: { mount: 'floor', footprint: { w: 2, h: 1 }, blocks: true, variants: ['wood', 'white', 'dark', 'legal'] },
   office_chair_front: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: false, seat: true, variants: ['black', 'blue', 'red', 'green', 'gray'] },
   office_chair: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: false, seat: true, variants: ['black', 'blue', 'red', 'green', 'gray'] },
-  bookshelf: { mount: 'floor', footprint: { w: 2, h: 1 }, blocks: true },
+  bookshelf: { mount: 'floor', footprint: { w: 2, h: 1 }, blocks: true, variants: ['classic', 'legal'] },
   filing_cabinet: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: true },
   printer: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: true },
   trash_bin: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: true },
@@ -229,14 +232,14 @@ export const FURNITURE: Readonly<Record<FurnitureKind, FurnitureDef>> = {
   plant_tall: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: true, variants: ['palm', 'ficus', 'monstera', 'bonsai'] },
   glass_partition: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: true, variants: ['h', 'v', 'end'] },
   binder_shelf: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: true },
-  meeting_table: { mount: 'floor', footprint: { w: 3, h: 2 }, blocks: true },
+  meeting_table: { mount: 'floor', footprint: { w: 3, h: 2 }, blocks: true, variants: ['classic', 'legal'] },
   stool: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: false, seat: true },
   floor_lamp: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: true },
   water_cooler: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: true },
   whiteboard: { mount: 'wall', footprint: { w: 3, h: 0 }, blocks: false },
   window: { mount: 'wall', footprint: { w: 2, h: 0 }, blocks: false },
   clock: { mount: 'wall', footprint: { w: 1, h: 0 }, blocks: false },
-  poster: { mount: 'wall', footprint: { w: 1, h: 0 }, blocks: false, variants: ['code', 'coffee', 'rocket', 'cat', 'bug', 'ship_it'] },
+  poster: { mount: 'wall', footprint: { w: 1, h: 0 }, blocks: false, variants: ['code', 'coffee', 'rocket', 'cat', 'bug', 'ship_it', 'law_justice', 'law_charter', 'law_columns'] },
   painting: { mount: 'wall', footprint: { w: 2, h: 0 }, blocks: false },
   tv: { mount: 'wall', footprint: { w: 2, h: 0 }, blocks: false },
   light_switch: { mount: 'wall', footprint: { w: 1, h: 0 }, blocks: false, variants: ['on', 'off'] },
@@ -261,7 +264,10 @@ export const FURNITURE: Readonly<Record<FurnitureKind, FurnitureDef>> = {
   arcade: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: true },
   toilet_stall: { mount: 'floor', footprint: { w: 2, h: 2 }, blocks: true, states: 2 },
   sink: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: true },
+  washroom_vanity: { mount: 'floor', footprint: { w: 3, h: 1 }, blocks: true },
+  hygiene_cabinet: { mount: 'floor', footprint: { w: 2, h: 1 }, blocks: true },
   reception_desk: { mount: 'floor', footprint: { w: 3, h: 1 }, blocks: true },
+  magazine_rack: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: true },
   bench: { mount: 'floor', footprint: { w: 2, h: 1 }, blocks: false, seat: true },
 };
 

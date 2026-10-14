@@ -36,11 +36,11 @@ describe('visão geral', () => {
     const free = overviewFrame(building, 1440, 900, { top: 0, right: 0, bottom: 0, left: 0 });
     const ui = overviewFrame(building, 1440, 900, { top: 64, right: 0, bottom: 200, left: 320 });
     expect(ui.zoom).toBeLessThan(free.zoom);
-    // a altura do enquadramento (placas + prédio + meio-fio) cabe entre a barra superior e a inferior
-    const h = (building.h + 3.5 * 16) * ui.zoom;
+    // Indoor walls and their clearance fit between the upper and lower panels.
+    const h = (building.h + 16) * ui.zoom;
     expect(h).toBeLessThanOrEqual(900 - 64 - 200 - 30);
-    // começa acima da parede norte (placas) e termina abaixo da fachada sul
-    expect(ui.cy).toBeGreaterThan(building.h / 2);
+    // No exterior footprint shifts the center away from the offices.
+    expect(ui.cy).toBe(building.h / 2);
     expect(ui.dy).toBeGreaterThan(0);
   });
 });
