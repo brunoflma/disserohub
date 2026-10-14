@@ -41,6 +41,7 @@ import { CodexHistory } from './sources/codex/history';
 import { CodexSource } from './sources/codex/source';
 import { createBuildReader } from './build';
 import { UpdateChecker } from './updates/checker';
+import { createGithubReleaseFetch } from './updates/github';
 import { setLocale, tr } from '../shared/i18n';
 import { createCliRunner, createOpener, SpawnService } from './spawn/spawn';
 import { runnableClaudeBin } from './claude-bin';
@@ -83,6 +84,7 @@ if (config.terminal && !config.inDocker) {
 const late: { office?: Office; agents?: SourceSet; permissions?: PermissionRegistry; messages?: MessageRegistry; ptys?: PtyManager; ptyOff?: string } = {};
 // Versão nova: consulta a release mais recente no GitHub a cada 6 h (HABBLAUD_UPDATE_CHECK=0 desliga).
 const updates = new UpdateChecker({
+  fetch: createGithubReleaseFetch(),
   current: config.version,
   repo: config.repo,
   enabled: config.updateCheck,

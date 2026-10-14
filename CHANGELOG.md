@@ -10,6 +10,16 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+## [0.11.2] - 2026-10-14
+
+### Corrigido
+
+- A consulta de versões pode usar uma sessão local já existente do GitHub CLI quando a cota anônima do GitHub se esgota. A alternativa é limitada às releases públicas do DisseroHub; não instala o CLI, não distribui tokens e preserva o erro original se não houver uma sessão disponível.
+
+### Atualização
+
+Instale somente esta release do DisseroHub, preservando dados e customizações conforme o README. O botão **Verificar agora** continua sendo apenas uma consulta, e o plugin hospedado do Dissero mantém sua distribuição independente.
+
 ## [0.11.1] - 2026-10-14
 
 Primeira distribuição pública do DisseroHub, baseada no Habblaud v0.11.0. Os registros das versões anteriores abaixo pertencem ao projeto original.

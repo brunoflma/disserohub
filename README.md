@@ -11,7 +11,7 @@ Requer Node.js 22.12 ou superior. Selecione uma versão na página de [releases 
 ```powershell
 git clone https://github.com/brunoflma/disserohub.git
 cd disserohub
-git checkout --detach v0.11.1
+git checkout --detach v0.11.2
 npm ci
 npm run build
 npm start
@@ -24,6 +24,8 @@ Os identificadores internos `habblaud`, as variáveis `HABBLAUD_*` e o diretóri
 ## Atualizações
 
 **Verificar agora** apenas consulta versões: não baixa nem instala código. As consultas e os links de atualização usam exclusivamente `brunoflma/disserohub`. Uma versão publicada pelo Habblaud não é uma atualização do Dissero.
+
+Se a cota anônima do GitHub se esgotar e o GitHub CLI já estiver instalado e autenticado localmente, o servidor usa essa sessão existente somente para consultar as releases públicas deste repositório. Nenhum token é incluído no aplicativo ou nas requisições anônimas. O CLI é opcional; sem ele, a verificação aguarda a cota normal voltar.
 
 A atualização é administrada. Pare o serviço, faça backup do diretório de dados e confira `git status --porcelain` na instalação. Se houver modificações, preserve e integre essas alterações em um candidato separado antes de continuar. Em uma instalação sem alterações, selecione a tag aprovada nas releases do DisseroHub, execute `npm ci` e `npm run build` e então reinicie o serviço. Preserve a instalação anterior até validar a nova versão.
 
