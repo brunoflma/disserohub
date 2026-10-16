@@ -1,6 +1,6 @@
 {
   "name": "habblaud",
-  "version": "0.11.3",
+  "version": "1.0.3",
   "private": true,
   "description": "DisseroHub: ambiente visual de trabalho do Dissero, baseado no Habblaud.",
   "license": "MIT",
@@ -11,7 +11,8 @@
   "homepage": "https://github.com/brunoflma/disserohub#readme",
   "disserohub": {
     "upstreamRepository": "marmottajr/habblaud",
-    "upstreamVersion": "0.11.0"
+    "upstreamVersion": "0.11.0",
+    "upstreamReferenceVersion": "1.0.3"
   },
   "type": "module",
   "engines": {

@@ -13,7 +13,7 @@ Para uma instalação conduzida por um agente, estão preparados os prompts [sem
 ```powershell
 git clone https://github.com/brunoflma/disserohub.git
 cd disserohub
-git checkout --detach v0.11.3
+git checkout --detach v1.0.3
 npm ci
 npm run build
 npm start
@@ -44,7 +44,7 @@ git remote add upstream https://github.com/marmottajr/habblaud.git
 git fetch upstream --tags
 ```
 
-Novidades do Habblaud devem ser conciliadas em uma branch de integração, mantendo as customizações. A versão do Dissero é independente da versão do motor; atualize a base registrada em `package.json` e `shared/distribution.ts` quando integrar uma nova versão do motor.
+Novidades do Habblaud devem ser revisadas, mantendo as customizações. A numeração do DisseroHub acompanha a release oficial revisada: Habblaud 1.0.3 → DisseroHub 1.0.3. A referência de numeração é registrada separadamente da base técnica efetivamente incorporada, que só muda após uma integração do motor. Consulte a [política de versões](docs/UPSTREAM-VERSIONING.md).
 
 ```powershell
 npm run typecheck
@@ -54,14 +54,14 @@ npm run build
 
 A CI executa essas verificações no Linux. Alguns testes originais dependem de permissões e caminhos Unix; execute a suíte completa no Linux ou WSL ao trabalhar no Windows.
 
-Após aprovação, aumente a versão com `npm version patch --no-git-tag-version` (ou `minor`). O comando sincroniza também os manifests das integrações locais herdadas do Habblaud. Escreva as notas no `CHANGELOG.md` e publique a partir da `main` limpa e sincronizada:
+Após revisar a release oficial, alinhe `package.json.version`, `disserohub.upstreamReferenceVersion` e `UPSTREAM_REFERENCE_VERSION` em `shared/distribution.ts`. Execute `node scripts/version-sync.mjs` para sincronizar os manifests das integrações locais herdadas do Habblaud. Escreva as notas no `CHANGELOG.md` e publique a partir da `main` limpa e sincronizada:
 
 ```powershell
 npm run release -- --dry-run
 npm run release
 ```
 
-O publicador exige `origin` e `package.json` apontando para este fork e CI bem-sucedida no commit exato. Todas as chamadas de publicação ao GitHub selecionam explicitamente o DisseroHub, inclusive quando o GitHub CLI usa o upstream como padrão de um fork.
+O publicador exige números alinhados à referência revisada, base técnica coerente, `origin` e `package.json` apontando para este fork e CI bem-sucedida no commit exato. Todas as chamadas de publicação ao GitHub selecionam explicitamente o DisseroHub, inclusive quando o GitHub CLI usa o upstream como padrão de um fork.
 
 ## Licença
 

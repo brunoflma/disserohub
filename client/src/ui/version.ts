@@ -8,7 +8,7 @@ import { formatDateTime, relativeTime } from './format';
 import { pixelIcon } from './icons';
 import { safeLocalStorage } from './prefs';
 import { tr } from '../../../shared/i18n';
-import { UPSTREAM_BASE_VERSION } from '../../../shared/distribution';
+import { UPSTREAM_BASE_VERSION, UPSTREAM_REFERENCE_VERSION } from '../../../shared/distribution';
 
 /** Última versão nova já avisada neste navegador (o aviso sai uma vez por versão). */
 export const UPDATE_SEEN_KEY = 'habblaud:update-seen';
@@ -151,7 +151,7 @@ export class AboutGroup {
       'div',
       { class: 'ui-set-group ui-about', attrs: { id: 'ui-about' } },
       h('h3', { text: tr('Sobre'), tabIndex: -1 }),
-      h('p', { class: 'ui-small', text: `Base técnica: Habblaud v${UPSTREAM_BASE_VERSION}. As atualizações do Dissero são verificadas no DisseroHub, com nossas customizações e melhorias.` }),
+      h('p', { class: 'ui-small', text: `Referência de numeração revisada: Habblaud v${UPSTREAM_REFERENCE_VERSION}. Base técnica: v${UPSTREAM_BASE_VERSION}, com backports e customizações. As atualizações são verificadas somente no DisseroHub.` }),
       h('div', { class: 'ui-about__head' }, h('span', { class: 'ui-about__name' }, 'Dissero ', this.name), this.checkBtn),
       this.status,
       this.fresh,

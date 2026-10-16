@@ -10,6 +10,19 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+## [1.0.3] - 2026-10-16
+
+### Alterado
+
+- A numeração do DisseroHub passa a acompanhar a release oficial do Habblaud revisada, começando pela 1.0.3. A versão 0.11.3 já publicada permanece no histórico.
+- A seção Sobre distingue a referência de numeração revisada (1.0.3) da base técnica efetiva (0.11.0 com backports e customizações). A mudança de número não representa uma incorporação integral do motor 1.0.3.
+- O publicador verifica o alinhamento entre a versão da distribuição, a referência oficial revisada e os metadados da base técnica antes de publicar.
+
+### Compatibilidade
+
+- Avaliada a release oficial 1.0.3, commit `faa1a012b5fbf632c66dc6801c5383e53a542406`. Sua correção trata do retorno da cidade do World ao escritório ao abrir pedidos e avisos; esse fluxo não existe no DisseroHub e não exige backport.
+- As melhorias e as ressalvas da 0.11.3 são preservadas. O World continua fora desta distribuição, e as atualizações continuam sendo disponibilizadas somente pelo DisseroHub.
+
 ## [0.11.3] - 2026-10-16
 
 ### Adicionado

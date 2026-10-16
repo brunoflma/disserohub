@@ -2,14 +2,14 @@
 // release com o texto dessa seção como notas (é o que o Habblaud abre em Configurações › Sobre › Ver o que mudou).
 //   npm run release                -> publica (precisa do gh autenticado)
 //   npm run release -- --dry-run   -> só confere e mostra as notas
-// Antes: suba a versão no package.json (npm version minor --no-git-tag-version), escreva a seção no CHANGELOG.md e
-// faça o merge na main.
+// Antes: revise a release oficial, alinhe package.json/shared/distribution.ts e os manifests, escreva o CHANGELOG
+// e faça o merge na main (docs/UPSTREAM-VERSIONING.md).
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { DISSERO_REPOSITORY } from '../shared/distribution';
+import { DISSERO_REPOSITORY, UPSTREAM_BASE_VERSION, UPSTREAM_REFERENCE_VERSION, UPSTREAM_REPOSITORY } from '../shared/distribution';
 import { parseGithubRepo } from '../server/updates/checker';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -18,6 +18,23 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export function assertReleaseTarget(repository: unknown, origin: string): void {
   if (parseGithubRepo(repository) !== DISSERO_REPOSITORY || parseGithubRepo(origin) !== DISSERO_REPOSITORY) {
     throw new Error(`A publicação exige package.json e origin apontando para ${DISSERO_REPOSITORY}.`);
+  }
+}
+
+interface ReleasePackage {
+  version: string;
+  repository?: unknown;
+  disserohub?: { upstreamRepository?: string; upstreamVersion?: string; upstreamReferenceVersion?: string };
+}
+
+/** Follow the reviewed official number while retaining the actual engine baseline separately. */
+export function assertVersionAlignment(pkg: ReleasePackage): void {
+  if (!/^\d+\.\d+\.\d+$/.test(pkg.version) || pkg.version !== UPSTREAM_REFERENCE_VERSION
+    || pkg.disserohub?.upstreamReferenceVersion !== UPSTREAM_REFERENCE_VERSION) {
+    throw new Error('A versão do DisseroHub deve acompanhar a referência oficial revisada em package.json e shared/distribution.ts.');
+  }
+  if (pkg.disserohub.upstreamRepository !== UPSTREAM_REPOSITORY || pkg.disserohub.upstreamVersion !== UPSTREAM_BASE_VERSION) {
+    throw new Error('A base técnica efetiva deve permanecer registrada separadamente da referência de numeração.');
   }
 }
 
@@ -107,8 +124,9 @@ function main(argv: string[]): void {
     return;
   }
 
-  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string; repository?: unknown };
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as ReleasePackage;
   assertReleaseTarget(pkg.repository, run('git', ['remote', 'get-url', 'origin']));
+  assertVersionAlignment(pkg);
   const version = pkg.version;
   const tag = `v${version}`;
   const section = changelogSection(readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8'), version);
