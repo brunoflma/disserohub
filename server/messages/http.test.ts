@@ -4,7 +4,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { InboxMessage, OfficeSnapshot, OutboxMessage } from '../../shared/types';
+import type { Activity, InboxMessage, OfficeSnapshot, OutboxMessage } from '../../shared/types';
 import { AccountsService } from '../accounts/service';
 import { loadConfig, messagesOffReason } from '../config';
 import { createApiHandler } from '../http/app';
@@ -271,5 +271,74 @@ describe('rotas', () => {
   it('demo com o recurso desligado: os agentes fictícios também não recebem', async () => {
     srv = await serveMessages({ enabled: false, demo: true });
     expect((await snapshot(srv)).agents.filter((a) => a.canMessage)).toEqual([]);
+  });
+});
+
+describe('responder perguntas do Codex pelo cartão', () => {
+  const id = 'codex:question-test';
+  const activity: Activity = { id: 'test#call-one', kind: 'ask', text: 'Pergunta sintética', icon: '?', tool: 'functions.request_user_input_async', at: 1,
+    questions: [{ index: 0, question: 'Qual formato usar?', options: [{ index: 0, label: 'PDF' }, { index: 2, label: 'Texto' }] },
+      { index: 1, question: 'Alguma observação?', options: [] }] };
+  const body = (other = 'Pode seguir com o teste') => ({ agentId: id, activityId: activity.id, answer: { question: 1, other } });
+  async function prepare() {
+    const deliveries: string[] = [];
+    srv = await serveMessages({ registry: { codex: { homeOf: () => process.cwd(), run: async job => { deliveries.push(job.text); return { ok: true }; } } } });
+    srv.office.addMain({ id, provider: 'codex', account: '.codex', sessionId: '11111111-1111-4111-8111-111111111111', cwd: '/synthetic', role: 'Agente principal', startedAt: 1, status: 'working' });
+    srv.office.setPendingQuestions(id, [activity]);
+    return deliveries;
+  }
+
+  it('queues the identified answer, reuses receipts and preserves pending questions until source confirmation', async () => {
+    const deliveries = await prepare();
+    const first = await post(srv!, '/api/messages/answer', body());
+    expect(first.status).toBe(201);
+    const receipt = first.json as OutboxMessage;
+    expect((await post(srv!, '/api/messages/answer', body())).json).toMatchObject({ id: receipt.id });
+    expect((await post(srv!, '/api/messages/answer', body('Uma resposta diferente'))).status).toBe(409);
+    await sleep(20);
+    expect(deliveries).toHaveLength(1);
+    const encoded = JSON.parse(deliveries[0].split('\n')[1]);
+    expect(JSON.parse(encoded.questionItemId)).toEqual([activity.tool, 'call-one', 1]);
+    expect(encoded.answer).toBe('Pode seguir com o teste');
+    expect(srv!.registry!.get(receipt.id)?.status).toBe('delivered');
+    expect(srv!.office.get(id)?.pendingQuestions).toEqual([activity]);
+    srv!.office.setPendingQuestions(id, []);
+    expect((await post(srv!, '/api/messages/answer', body())).status).toBe(409);
+  });
+
+  it('validates choices, question ownership and bounds before any delivery', async () => {
+    const deliveries = await prepare();
+    for (const invalid of [
+      { ...body(), activityId: 'another#call' }, { ...body(), agentId: MAIN },
+      { ...body(), answer: { question: 3, other: 'sim' } },
+      { ...body(), answer: { question: 0, options: [1] } },
+      { ...body(), answer: { question: 0, options: [0, 2] } },
+      { ...body(), answer: { question: 1, other: '\0' } },
+      { ...body(), answer: { question: 1, other: 'x'.repeat(2_001) } },
+    ]) expect([400, 409]).toContain((await post(srv!, '/api/messages/answer', invalid)).status);
+    expect(deliveries).toHaveLength(0);
+    expect((await post(srv!, '/api/messages/answer', { ...body(), answer: { question: 0, options: [2] } })).status).toBe(201);
+    await sleep(20);
+    expect(JSON.parse(deliveries[0].split('\n')[1]).answer).toBe('Texto');
+  });
+
+  it('does not queue an answer to a blocking request_user_input', async () => {
+    const deliveries = await prepare();
+    srv!.office.setPendingQuestions(id, [{ ...activity, tool: 'request_user_input' }]);
+    const result = await post(srv!, '/api/messages/answer', body());
+    expect(result.status).toBe(409);
+    expect(result.text).toMatch(/bloqueante/);
+    expect(deliveries).toHaveLength(0);
+  });
+
+  it('inherits JSON, Origin and enabled-feature guards from message routes', async () => {
+    const deliveries = await prepare();
+    expect((await post(srv!, '/api/messages/answer', body(), { Origin: 'https://untrusted.example' })).status).toBe(403);
+    expect((await post(srv!, '/api/messages/answer', body(), { 'Content-Type': 'text/plain' })).status).toBe(415);
+    expect((await request(srv!.base, '/api/messages/answer')).status).toBe(405);
+    expect(deliveries).toHaveLength(0);
+    await srv!.close();
+    srv = await serveMessages({ enabled: false });
+    expect((await post(srv, '/api/messages/answer', body())).status).toBe(403);
   });
 });

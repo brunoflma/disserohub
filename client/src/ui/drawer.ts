@@ -42,6 +42,7 @@ import {
 } from './model';
 import { access } from '../net/access';
 import { PermissionCard } from './permission';
+import { QuestionReplies } from './question-replies';
 import { canRenameRoom } from './roomrename';
 import { accountChipLabel, accountProvider, CODEX_LIVE_HINT, codexApprovalLabel, providerOf } from './provider';
 import { ptyControllable } from './ptyapi';
@@ -232,7 +233,7 @@ class AgentView {
    * permissão), quem aparece é o cartão de resposta, no lugar do alerta.
    */
   private alertQuestions: HTMLElement;
-  private alertQuestionsKey = '';
+  private questionReplies: QuestionReplies;
   /** Dica de como responder as perguntas por aqui (o plugin de permissões). */
   private alertAnswerHint: HTMLElement;
   /** Pedido de permissão (ou pergunta) para responder por aqui (substitui o alerta genérico enquanto existe). */
@@ -331,7 +332,8 @@ class AgentView {
     this.termWhy = h('p', { class: 'ui-term-cta__why', hidden: true, attrs: { role: 'status' } });
 
     this.alertText = h('p', { class: 'ui-alert__text' });
-    this.alertQuestions = h('div', { class: 'ui-ask', hidden: true });
+    this.questionReplies = new QuestionReplies(ctx);
+    this.alertQuestions = this.questionReplies.el;
     this.alertAnswerHint = h('p', { class: 'ui-ask__answer-hint', hidden: true, text: tr('Com o plugin habblaud-permissoes (npm run mod:install), dá para responder as perguntas por aqui.') });
     const alertIcon = h('span', { class: 'ui-alert__icon', attrs: { 'aria-hidden': 'true' } });
     alertIcon.innerHTML = ICONS.hand;
@@ -587,18 +589,21 @@ class AgentView {
     // Alerta.
     const waiting = a.status === 'waiting' && !!live;
     this.perm.render(live);
-    setHidden(this.alert, !waiting || this.perm.visible);
-    if (waiting) {
+    const pending = codex && live ? (a.pendingQuestions ?? []) : [];
+    setHidden(this.alert, (!waiting && !pending.length) || this.perm.visible);
+    if (waiting || pending.length) {
       const accName = account?.name ?? a.account;
       // Codex: "Vá ao Codex (Conta X)"; sem repetir quando a conta já se chama "Codex".
       const where = codex ? tr('ao Codex{0}', [/codex/i.test(accName) ? '' : ` (${accName})`]) : tr('ao terminal da {0}', [accName]);
-      setText(this.alertText, tr('Vá {0} em {1} para responder{2}', [where, room?.name ?? tr('seu projeto'), a.waitingFor ? `: ${a.waitingFor}` : '.']));
+      setText(this.alertText, pending.some(q => /^(?:functions\.)?request_user_input_async$/.test(q.tool ?? ''))
+        ? tr('Responda abaixo para enviar a resposta à sessão deste agente.')
+        : tr('Vá {0} em {1} para responder{2}', [where, room?.name ?? tr('seu projeto'), a.waitingFor ? `: ${a.waitingFor}` : '.']));
     }
     // Perguntas pendentes, inclusive quando o Codex continua trabalhando enquanto aguarda a resposta.
     const asking = waiting && !codex && a.activity?.kind === 'ask' ? a.activity : undefined;
-    this.renderQuestions(waiting && codex ? (a.pendingQuestions ?? []) : asking ? [asking] : []);
-    // Sem o pedido no escritório: dá para responder por aqui com o plugin (só com a trava local, como o cartão). O Codex
-    // não responde perguntas pelo escritório.
+    this.questionReplies.render(live, codex ? pending : asking ? [asking] : []);
+    // Perguntas do Claude sem pedido no escritório dependem do plugin de permissões.
+    // As perguntas assíncronas do Codex usam o formulário acima e o canal da própria sessão.
     const answerable =
       !codex && !!asking?.questions?.length && !this.perm.visible && !this.ctx.store.mock && !!this.ctx.store.snapshot?.meta.terminal && access().permissions;
     setHidden(this.alertAnswerHint, !answerable);
@@ -678,33 +683,6 @@ class AgentView {
 
     // Codex: como ter o ao vivo e as aprovações por aqui (o servidor ainda não diz se os hooks dele estão ligados).
     setHidden(this.codexHint, !codex || a.kind !== 'main' || !live || this.ctx.store.replaying);
-  }
-
-  /** Lista as perguntas pendentes com as opções; a resposta é dada no aplicativo de origem. */
-  private renderQuestions(acts: readonly Activity[]): void {
-    const qs = acts.flatMap((act) => act.questions ?? []);
-    setHidden(this.alertQuestions, qs.length === 0);
-    const key = acts.map((act) => `${act.id}|${act.questions?.map((q) => q.index).join(',')}`).join(';');
-    if (key === this.alertQuestionsKey) return;
-    this.alertQuestionsKey = key;
-    this.alertQuestions.replaceChildren(
-      ...qs.map((q) =>
-        h(
-          'div',
-          { class: 'ui-ask__q' },
-          q.header ? h('span', { class: 'ui-ask__tag', text: q.header }) : null,
-          h('p', { class: 'ui-ask__question', text: q.question }),
-          q.multiSelect ? h('p', { class: 'ui-ask__hint', text: tr('Pode escolher mais de uma') }) : null,
-          h(
-            'ol',
-            { class: 'ui-ask__opts' },
-            ...q.options.map((o) =>
-              h('li', {}, h('strong', { text: o.label }), o.description ? h('span', { class: 'ui-ask__desc', text: o.description }) : null),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 
   private renderTerminalButton(live: boolean, provider = providerOf(this.last)): void {

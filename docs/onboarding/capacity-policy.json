@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "disserohub-capacity-v2",
+  "status": "provisional-awaiting-hardware-validation",
+  "reviewedOn": "2026-10-15",
+  "units": "GiB",
+  "guide": "REQUISITOS.md",
+  "platforms": ["win32", "darwin", "linux"],
+  "architectures": ["x64", "arm64"],
+  "totalMemoryToleranceGiB": 0.5,
+  "profiles": {
+    "native": {
+      "minimum": {
+        "totalMemoryGiB": 8,
+        "availableMemoryGiB": 2,
+        "logicalCpuCount": 2,
+        "freeDiskGiB": 10
+      },
+      "recommended": {
+        "totalMemoryGiB": 16,
+        "availableMemoryGiB": 4,
+        "logicalCpuCount": 4,
+        "freeDiskGiB": 10
+      }
+    },
+    "docker": {
+      "minimum": {
+        "totalMemoryGiB": 16,
+        "availableMemoryGiB": 6,
+        "logicalCpuCount": 4,
+        "freeDiskGiB": 25
+      },
+      "recommended": {
+        "totalMemoryGiB": 32,
+        "availableMemoryGiB": 10,
+        "logicalCpuCount": 8,
+        "freeDiskGiB": 40
+      },
+      "daemon": {
+        "minimumMemoryGiB": 4,
+        "recommendedMemoryGiB": 8,
+        "minimumLogicalCpuCount": 2,
+        "recommendedLogicalCpuCount": 4,
+        "minimumFreeDiskGiB": 10,
+        "recommendedFreeDiskGiB": 20
+      }
+    }
+  }
+}

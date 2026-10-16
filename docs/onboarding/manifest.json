@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "status": "prepared",
+  "integrationEnabled": false,
+  "autoExecute": false,
+  "distributionRepository": "brunoflma/disserohub",
+  "preparedOn": "2026-10-15",
+  "verifiedRelease": {
+    "tag": "v0.11.2",
+    "commit": "473779b6aa23670aea45b5a24d669f10ec57a0f7"
+  },
+  "releaseSelection": {
+    "policy": "published-stable-release",
+    "allowDefaultBranchFallback": false,
+    "allowUpstreamFallback": false,
+    "requireResolvedCommit": true
+  },
+  "plugin": {
+    "currentId": "amf-juridico",
+    "plannedName": "Dissero",
+    "activation": "deferred"
+  },
+  "defaultMethod": "native",
+  "methodSelection": {
+    "nativeRuntime": "nodejs-npm",
+    "dockerRequiresExplicitChoice": true,
+    "automaticDockerFallback": false
+  },
+  "templates": {
+    "native": "INSTALAR-SEM-DOCKER.md",
+    "docker": "INSTALAR-COM-DOCKER.md"
+  },
+  "contract": "PRIMEIRO-USO.md",
+  "capacityAssessment": {
+    "policy": "capacity-policy.json",
+    "guide": "REQUISITOS.md",
+    "diagnostic": "check-capacity.mjs",
+    "tests": "check-capacity-cases.mjs",
+    "activation": "deferred",
+    "requiredBeforeNewInstall": true,
+    "requiredResult": "eligible",
+    "acceptedProfiles": ["basic", "recommended"],
+    "hardwareValidation": "pending",
+    "unknownMeasurementAction": "needs_review",
+    "nodeAbsentAction": "read-only-native-os-probes"
+  },
+  "requirements": {
+    "appMinimumNode": "22.12.0",
+    "httpsProxy": {
+      "package": "portless",
+      "version": "0.15.8",
+      "sourceCommit": "27598545f08f8055cb3b9fb410f8d250f054f46d",
+      "minimumNode": "24.0.0"
+    }
+  },
+  "cleanInstallValidation": {
+    "windowsNative": "pending",
+    "macosNative": "pending",
+    "linuxNative": "pending",
+    "windowsWslDocker": "pending",
+    "macosDocker": "pending",
+    "linuxDocker": "pending"
+  }
+}

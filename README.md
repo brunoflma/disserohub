@@ -8,10 +8,12 @@ Este repositório público contém o motor local, as customizações e as melhor
 
 Requer Node.js 22.12 ou superior. Selecione uma versão na página de [releases do DisseroHub](https://github.com/brunoflma/disserohub/releases).
 
+Para uma instalação conduzida por um agente, estão preparados os prompts [sem Docker](docs/onboarding/INSTALAR-SEM-DOCKER.md) e [com Docker](docs/onboarding/INSTALAR-COM-DOCKER.md), com escolha de sistema, preservação de instalações existentes e verificações de serviço, HTTPS e integrações. O [pacote de primeiro uso](docs/onboarding/README.md) mantém a integração com o plugin desativada e a homologação de instalações limpas pendente.
+
 ```powershell
 git clone https://github.com/brunoflma/disserohub.git
 cd disserohub
-git checkout --detach v0.11.2
+git checkout --detach v0.11.3
 npm ci
 npm run build
 npm start

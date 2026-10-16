@@ -325,6 +325,15 @@ export class OfficeStore {
     return { error: typeof error === 'string' ? error : tr('erro {0}', [res.status]) };
   }
 
+  /** Async question reply; the server validates its identity against the current pending questions. */
+  async answerQuestion(reply: import('../../../shared/question-replies').QuestionReply): Promise<{ message: OutboxMessage } | { error: string }> {
+    if (this.mock) return { error: tr('Resposta a esta pergunta disponível somente no teste com servidor local') };
+    const res = await fetch('/api/messages/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reply) });
+    const body = await res.json().catch(() => undefined) as { error?: string } | OutboxMessage | undefined;
+    if (res.status === 201 && body && 'id' in body) return { message: body as OutboxMessage };
+    return { error: body && 'error' in body && typeof body.error === 'string' ? body.error : tr('erro {0}', [res.status]) };
+  }
+
   /** Situação de uma mensagem (GET /api/messages/:id). null = o servidor não a conhece (404). Sem conexão: lança. */
   async messageStatus(id: string): Promise<OutboxMessage | null> {
     if (this.mock) {

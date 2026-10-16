@@ -17,10 +17,12 @@
 // auxiliar do host (npm run codex:bridge) busca em POST /api/codex/bridge/poll e confirma em
 // POST /api/codex/bridge/ack. Mesmos estados, prazos e limites; canMessage = há entregador (o binário no modo Node ou
 // o auxiliar visto há até PRESENCE_MS). `delivered` = entrou na fila da sessão (entra quando ela ficar ociosa).
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { truncate } from '../../shared/activity';
 import { describeMessage, MESSAGE_MAX } from '../../shared/messages';
-import type { Activity, AgentInfo, InboxMessage, OutboxMessage } from '../../shared/types';
+import { answerSummary, checkAnswers } from '../../shared/answers';
+import { isAsyncQuestion, questionReplyText } from '../../shared/question-replies';
+import type { Activity, AgentInfo, InboxMessage, OutboxMessage, PermissionAnswer } from '../../shared/types';
 import { errMsg, log } from '../log';
 import type { CodexQueueResult, CodexQueueRunner } from './codex';
 import { tr } from '../../shared/i18n';
@@ -126,6 +128,7 @@ interface Entry {
   via?: 'node' | 'bridge';
   /** Falhou por falta de confirmação: uma confirmação atrasada ainda corrige a situação. */
   late?: boolean;
+  question?: { activityId: string; index: number; fingerprint: string };
 }
 
 type Rec = Record<string, unknown>;
@@ -279,6 +282,44 @@ export class MessageRegistry {
     return { message: out };
   }
 
+  /** A reply is bound to a still-pending question in this exact agent/session. Delivery remains a queue. */
+  answerQuestion(raw: unknown): SendResult {
+    const body = rec(raw);
+    const agentId = shortStr(body?.agentId, ID_MAX);
+    const activityId = shortStr(body?.activityId, 1_000);
+    const answer = rec(body?.answer);
+    if (!agentId || !activityId || !answer || !Number.isInteger(answer.question) || Number(answer.question) < 0 || Number(answer.question) > 3) {
+      throw new InvalidRequest('esperado {agentId, activityId, answer: {question, options?, other?}}');
+    }
+    const agent = this.opts.office.get(agentId) ?? this.opts.demoAgent?.(agentId);
+    if (!agent) return { error: 'not-found' };
+    if (agent.provider !== 'codex' || agent.kind !== 'main') return { error: 'unavailable', reason: tr('esta resposta exige uma pergunta do agente principal do Codex') };
+    const activity = agent.pendingQuestions?.find(a => a.id === activityId && a.questions?.some(q => q.index === answer.question));
+    if (!activity) return { error: 'unavailable', reason: tr('esta pergunta já foi respondida ou deixou de estar pendente; atualize o cartão') };
+    if (!isAsyncQuestion(activity)) return { error: 'unavailable', reason: tr('esta pergunta bloqueante precisa ser respondida no cliente do Codex; não será enviada como mensagem em fila') };
+    const question = activity.questions!.find(q => q.index === answer.question)!;
+    const normalized = checkAnswers([question], [answer as unknown as PermissionAnswer])?.[0];
+    const text = normalized && questionReplyText(activity, normalized);
+    if (!text) throw new InvalidRequest(tr('resposta inválida para esta pergunta'));
+    const fingerprint = createHash('sha256').update(text).digest('hex');
+    // Repeated clicks/HTTP retries reuse the same receipt instead of submitting a second reply.
+    for (const entry of this.messages.values()) {
+      if (entry.msg.agentId === agentId && entry.target === agent.sessionId && entry.question?.activityId === activityId
+        && entry.question.index === answer.question) {
+        return entry.question.fingerprint === fingerprint ? { message: { ...entry.msg } }
+          : { error: 'unavailable', reason: tr('já existe uma resposta enviada para esta pergunta; confira a entrega antes de alterar') };
+      }
+    }
+    const sent = this.send({ agentId, text });
+    if ('message' in sent) {
+      const entry = this.messages.get(sent.message.id)!;
+      entry.question = { activityId, index: Number(answer.question), fingerprint };
+      entry.activity = { kind: 'communicate', icon: '💬', text: tr('Resposta pelo Dissero'), tool: 'HabblaudMessage',
+        detail: answerSummary([question], [normalized!]) };
+    }
+    return sent;
+  }
+
   /** Situação de uma mensagem (sem o texto), ou undefined. */
   get(id: string): OutboxMessage | undefined {
     const e = this.messages.get(id);
@@ -392,7 +433,12 @@ export class MessageRegistry {
     const now = this.now();
     for (const [id, e] of this.messages) {
       if (isFinal(e)) {
-        if (now - e.msg.updatedAt >= this.keepMs) this.messages.delete(id);
+        // A failed queue command can still complete late. Keep the question receipt while
+        // its source remains pending, including after the ordinary message retention window.
+        const agent = e.question && this.opts.office.get(e.msg.agentId);
+        const pending = agent && agent.sessionId === e.target && agent.pendingQuestions?.some(a =>
+          a.id === e.question!.activityId && a.questions?.some(q => q.index === e.question!.index));
+        if (now - e.msg.updatedAt >= this.keepMs && !pending) this.messages.delete(id);
         continue;
       }
       if (e.demo) {

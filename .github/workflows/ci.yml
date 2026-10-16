@@ -26,5 +26,6 @@ jobs:
 
       - run: npm ci
       - run: npm run typecheck
+      - run: node docs/onboarding/check-capacity-cases.mjs
       - run: npm test
       - run: npm run build

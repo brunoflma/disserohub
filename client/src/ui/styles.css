@@ -2234,6 +2234,22 @@
   color: var(--st-waiting);
 }
 
+.ui-question-reply {
+  min-width: 0;
+  margin: 14px 0 0;
+}
+.ui-question-reply__text {
+  display: block;
+  width: 100%;
+  min-height: 82px;
+  margin-top: 10px;
+  resize: vertical;
+}
+.ui-question-reply__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
 .ui-ask__question {
   font-size: 12.5px;
   font-weight: 600;

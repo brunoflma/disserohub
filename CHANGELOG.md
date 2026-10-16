@@ -10,6 +10,28 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+## [0.11.3] - 2026-10-16
+
+### Adicionado
+
+- Respostas a perguntas assíncronas do Codex no painel do agente, com alternativas, texto livre e acompanhamento do envio. O formulário permanece vinculado à pergunta original e evita duplicar respostas em uma nova tentativa. Perguntas bloqueantes continuam sendo respondidas no cliente de origem; o aceite da fila não é confirmação de consumo pelo agente.
+- Prompts de primeira instalação para Windows, macOS e Linux, com Node.js/npm como método padrão e Docker opcional. Incluem diagnóstico e política provisória de capacidade da máquina. A integração automática com o plugin jurídico permanece desativada e a homologação de instalações limpas continua pendente.
+
+### Melhorado
+
+- Salas de projetos com quatro composições diferentes, preservando as estações de trabalho e a circulação.
+- Sala temporária com canto de leitura, sofá, poltronas, mesa baixa, estante e iluminação, sem registrar estações para agentes.
+
+### Corrigido
+
+- Móveis altos afastados do vão das portas e poltronas da convivência alinhadas com espaço até a mesa.
+- A alternativa de cópia em janelas modais usa um campo auxiliar dentro da janela aberta e devolve o foco ao controle de origem, inclusive quando a operação é recusada. Correção pontual do Habblaud incorporada sem adicionar o World.
+
+### Validação e distribuição
+
+- A API moderna de cópia foi conferida com texto sintético. No fallback legado, foram verificados seleção, evento de cópia, foco e limpeza; a confirmação do conteúdo final no clipboard de um navegador convencional permanece pendente.
+- O canal de atualização continua exclusivo do DisseroHub. O Habblaud World e o plugin jurídico hospedado não fazem parte desta atualização.
+
 ## [0.11.2] - 2026-10-14
 
 ### Corrigido

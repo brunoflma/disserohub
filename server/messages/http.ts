@@ -28,8 +28,9 @@ function fail(res: ServerResponse, err: unknown): void {
 }
 
 export function createMessageRoutes(registry: MessageRegistry): (req: IncomingMessage, res: ServerResponse, path: string) => void {
-  const send = async (req: IncomingMessage, res: ServerResponse) => {
-    const r = registry.send(await readJson(req));
+  const send = async (req: IncomingMessage, res: ServerResponse, question = false) => {
+    const body = await readJson(req);
+    const r = question ? registry.answerQuestion(body) : registry.send(body);
     if ('message' in r) return sendJson(res, 201, r.message);
     switch (r.error) {
       case 'not-found':
@@ -66,6 +67,7 @@ export function createMessageRoutes(registry: MessageRegistry): (req: IncomingMe
 
   return (req, res, path) => {
     if (path === '/api/messages') return post(req, res, send);
+    if (path === '/api/messages/answer') return post(req, res, (req, res) => send(req, res, true));
     if (path === '/api/mod/inbox') return post(req, res, inbox);
     if (path === '/api/mod/inbox/ack') return post(req, res, ack);
     if (path === '/api/codex/bridge/poll') return post(req, res, codexPoll);

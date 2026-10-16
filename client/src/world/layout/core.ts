@@ -186,7 +186,7 @@ export function layoutLounge(): AreaLayout {
   const wall = CORE_WALLS.lounge;
   b.floor('wood', 0, 0, 16, 12, 401);
   b.rug(1.5, 3.2, 7, 5.2, '#526371', 402);
-  b.rug(9.2, 4.6, 5.6, 4.4, '#d7c8a8', 403);
+  b.rug(9.3, 3.4, 4.4, 7, '#d7c8a8', 403);
   // Sala de Convivência: leitura a oeste, debates a leste e passagem no meio.
   b.face(0.5, 6.5, wall);
   b.face(10, 5.5, CORE_WALLS.glass);
@@ -208,12 +208,12 @@ export function layoutLounge(): AreaLayout {
   b.seat('armchair', 'armchair', 2, 4, 'right', 'right', { order: 0.55 });
   b.seat('armchair', 'armchair', 6, 4, 'left', 'left', { order: 0.56 });
 
-  // Consultation table and a legal library, with usable seats on both sides.
+  // Duas fileiras alinhadas se olham por cima da mesa, com espaço entre os estofados e o tampo.
   b.furn('meeting_table', 10, 6, 'legal', { order: 0.4 });
-  b.seat('armchair', 'armchair', 9, 7, 'right', 'right', { group: 'debate:library', order: 0.6 });
-  b.seat('armchair', 'armchair', 13, 7, 'left', 'left', { group: 'debate:library', order: 0.61 });
-  b.seat('armchair', 'armchair', 10, 5, 'down', 'down', { group: 'debate:library', order: 0.62 });
-  b.seat('armchair', 'armchair', 12, 8, 'up', 'up', { group: 'debate:library', order: 0.63 });
+  b.seat('armchair', 'armchair', 10, 4, 'down', 'down', { group: 'debate:library', order: 0.6 });
+  b.seat('armchair', 'armchair', 12, 4, 'down', 'down', { group: 'debate:library', order: 0.61 });
+  b.seat('armchair', 'armchair', 10, 9, 'up', 'up', { group: 'debate:library', order: 0.62 });
+  b.seat('armchair', 'armchair', 12, 9, 'up', 'up', { group: 'debate:library', order: 0.63 });
 
   // Closed case archives replace the arcade cabinets.
   for (const lx of [13, 14]) {
@@ -229,7 +229,7 @@ export function layoutLounge(): AreaLayout {
   b.furn('floor_lamp', 1, 7, undefined, { order: 0.32 });
   b.furn('plant_tall', 14, 10, 'monstera', { order: 0.22 });
 
-  b.spot('talk', 11, 9, 'right', { group: 'talk:lounge', dx: -1 });
-  b.spot('talk', 12, 9, 'left', { group: 'talk:lounge', dx: 1 });
+  b.spot('talk', 11, 10, 'right', { group: 'talk:lounge', dx: -1 });
+  b.spot('talk', 12, 10, 'left', { group: 'talk:lounge', dx: 1 });
   return b.build();
 }

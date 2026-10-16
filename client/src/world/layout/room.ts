@@ -4,11 +4,10 @@
 //   linhas 2–10 piso (interior 14x9: colunas 1–14)
 //   linha 11    parede sul (salas ao norte: com a porta para o corredor)
 //
-// Ilha de 6 lugares face a face (3 desk ao sul, de costas para a câmera; 3 desk_back ao norte,
-// de frente), quadro kanban, placa com o nome e decoração. Para as salas não ficarem idênticas,
-// a semente da sala escolhe: o lado da ilha (layout espelhado), o tipo de canto de reunião
-// (mesa retangular, mesinhas redondas ou recanto com poltronas), os "cantos" da parte de baixo
-// (descanso, impressão, verde, mesa de pé) e a coluna de apoio junto à parede.
+// Cada sala tem 6 lugares de trabalho, um canto de reunião, quadro kanban, placa com o nome e
+// decoração. A semente escolhe um plano estrutural (ilha central, colaboração deslocada, galeria
+// alta ou plano aberto para overflow), além do espelhamento, do canto de reunião e dos apoios. As
+// variações são puras: salas vazias, salas lotadas e salas fantasma usam o mesmo contrato.
 import { FURNITURE, type Dir, type FurnitureKind, type RoomTheme, type WallStyle } from '../../art/api';
 import { mulberry32 } from '../../../../shared/hash';
 import { DOOR_W, DOOR_X, TILE } from '../constants';
@@ -30,9 +29,12 @@ const POSTERS = ['law_justice', 'law_charter', 'law_columns'] as const;
 export type MeetingStyle = 'table' | 'round' | 'lounge';
 /** Canto da parte de baixo da sala (linhas 9–10). */
 export type CornerStyle = 'rest' | 'print' | 'green' | 'standdesk' | 'stands';
+/** Plano dos móveis grandes; cada opção muda a silhueta da sala, não só a decoração. */
+export type RoomPlan = 'island' | 'collaboration' | 'gallery' | 'overflow';
 
 /** Variações sorteadas pela semente (exportado para testes). */
 export interface RoomVariant {
+  plan: RoomPlan;
   mirror: boolean;
   meeting: MeetingStyle;
   left: CornerStyle;
@@ -54,6 +56,8 @@ function shade(hex: string, amount: number): string {
 /** Sorteio das variações da sala (determinístico pela semente). */
 export function roomVariant(seed: number): RoomVariant {
   const rng = mulberry32((seed ^ 0x7a11) >>> 0);
+  const plans: RoomPlan[] = ['island', 'collaboration', 'gallery', 'overflow'];
+  const plan = plans[Math.floor(rng() * plans.length) % plans.length];
   const mirror = rng() < 0.5;
   const m = rng();
   const meeting: MeetingStyle = m < 0.45 ? 'table' : m < 0.78 ? 'round' : 'lounge';
@@ -62,7 +66,57 @@ export function roomVariant(seed: number): RoomVariant {
   const left = lefts[Math.floor(rng() * lefts.length) % lefts.length];
   let right = rights[Math.floor(rng() * rights.length) % rights.length];
   if (right === left) right = 'stands';
-  return { mirror, meeting, left, right };
+  return { plan, mirror, meeting, left, right };
+}
+
+/** Cor/padrão da parede que acompanha cada plano, sem depender de novos sprites. */
+function roomWall(theme: RoomTheme, plan: RoomPlan): WallStyle {
+  switch (plan) {
+    case 'collaboration':
+      return { ...theme.wall, base: shade(theme.wall.base, -0.035), trim: shade(theme.accent, 0.02), pattern: 'plain' };
+    case 'gallery':
+      return { ...theme.wall, base: shade(theme.wall.base, 0.05), trim: shade(theme.accent, -0.08), pattern: 'stripes' };
+    case 'overflow':
+      return { ...theme.wall, base: shade(theme.wall.base, 0.015), trim: shade(theme.accent, -0.16), pattern: 'brick' };
+    case 'island':
+      return { ...theme.wall, trim: theme.wall.trim ?? shade(theme.accent, -0.12) };
+  }
+}
+
+interface DeskPair {
+  x: number;
+  backY: number;
+  frontY: number;
+}
+
+/** Coordenadas locais dos três pares; mantêm os seis lugares, mas mudam a leitura da sala. */
+function deskPairs(plan: RoomPlan): readonly DeskPair[] {
+  switch (plan) {
+    case 'collaboration':
+      return [
+        { x: 5, backY: 5, frontY: 6 },
+        { x: 7, backY: 5, frontY: 6 },
+        { x: 10, backY: 5, frontY: 6 },
+      ];
+    case 'gallery':
+      return [
+        { x: 2, backY: 4, frontY: 5 },
+        { x: 4, backY: 4, frontY: 5 },
+        { x: 6, backY: 4, frontY: 5 },
+      ];
+    case 'overflow':
+      return [
+        { x: 2, backY: 3, frontY: 4 },
+        { x: 4, backY: 3, frontY: 4 },
+        { x: 6, backY: 6, frontY: 7 },
+      ];
+    case 'island':
+      return [
+        { x: 2, backY: 5, frontY: 6 },
+        { x: 4, backY: 5, frontY: 6 },
+        { x: 6, backY: 5, frontY: 6 },
+      ];
+  }
 }
 
 export function layoutProjectRoom(room: RoomInput, theme: RoomTheme): AreaLayout {
@@ -74,11 +128,11 @@ export function layoutProjectRoom(room: RoomInput, theme: RoomTheme): AreaLayout
   const b = new AreaBuilder(room.id, 'room', rect);
   const area = b.area;
   area.side = side;
-  const wall: WallStyle = theme.wall;
+  const wall: WallStyle = roomWall(theme, v.plan);
   const north = side === 'north';
   const door = { lx: DOOR_X, w: DOOR_W };
 
-  // ---- espelhamento (coordenadas locais pensadas com a ilha à esquerda)
+  // ---- espelhamento (coordenadas locais pensadas sem depender do lado do corredor)
   const mir = v.mirror;
   const fx = (lx: number, w = 1) => (mir ? 16 - lx - w : lx);
   const fdir = (d: Dir): Dir => (mir && (d === 'left' || d === 'right') ? (d === 'left' ? 'right' : 'left') : d);
@@ -95,8 +149,23 @@ export function layoutProjectRoom(room: RoomInput, theme: RoomTheme): AreaLayout
   // ---- piso: porcelanato claro (o banheiro é que usa azulejo); leve tom do tema dá identidade
   b.floor('marble', 0, 0, 16, 12, room.seed);
   area.floorTint = theme.carpet;
-  // tapete na cor do tema sob a ilha (identidade da sala)
-  rug(1.5, 3.25, 7, 5.5, theme.carpet, room.seed);
+  // A composição dos tapetes acompanha o plano: eles reforçam a silhueta dos móveis grandes.
+  switch (v.plan) {
+    case 'collaboration':
+      rug(4, 3.25, 9, 5.5, theme.carpet, room.seed);
+      rug(1, 8.6, 3.5, 1.25, shade(theme.carpet2, 0.08), room.seed + 3);
+      break;
+    case 'gallery':
+      rug(1.5, 3.25, 7, 4.5, theme.carpet, room.seed);
+      rug(9.5, 8.55, 4, 1.35, shade(theme.carpet2, 0.12), room.seed + 3);
+      break;
+    case 'overflow':
+      rug(1.25, 2.25, 7.5, 7.1, theme.carpet, room.seed);
+      break;
+    case 'island':
+      rug(1.5, 3.25, 7, 5.5, theme.carpet, room.seed);
+      break;
+  }
   // tapetinho na entrada
   rug(DOOR_X - 0.25, north ? 9.5 : 2, DOOR_W + 0.5, 1.25, shade(theme.carpet2, -0.1), room.seed + 1);
 
@@ -138,50 +207,64 @@ export function layoutProjectRoom(room: RoomInput, theme: RoomTheme): AreaLayout
   }
   spot('whiteboard', north ? 4 : 2, 2, 'up', { dx: 8, dy: 2 });
 
-  // ---- ilha de trabalho 3x2 face a face (colunas 2–7, linhas 4–7)
+  // ---- seis lugares de trabalho: o plano muda as posições sem quebrar os links mesa-assento
   const deskV = theme.deskVariant;
   const chairV = theme.chairVariant;
   const ranks = [2, 0, 4];
-  for (let i = 0; i < 3; i++) {
-    const lx = 2 + i * 2;
-    const back = furn('desk_back', lx, 5, deskV, { order: 0.35 + i * 0.05, seat: `N${i}` });
-    const front = furn('desk', lx, 6, deskV, { order: 0.4 + i * 0.05, seat: `S${i}` });
-    seat('desk', 'office_chair_front', lx, 4, 'down', chairV, { dx: TILE / 2, deskId: back, rank: ranks[i] + 1, side: 'N', order: 0.55 + i * 0.03 });
-    seat('desk', 'office_chair', lx, 7, 'up', chairV, { dx: TILE / 2, deskId: front, rank: ranks[i], side: 'S', order: 0.6 + i * 0.03 });
+  for (const [i, pair] of deskPairs(v.plan).entries()) {
+    const back = furn('desk_back', pair.x, pair.backY, deskV, { order: 0.35 + i * 0.05, seat: `N${i}` });
+    const front = furn('desk', pair.x, pair.frontY, deskV, { order: 0.4 + i * 0.05, seat: `S${i}` });
+    seat('desk', 'office_chair_front', pair.x, pair.backY - 1, 'down', chairV, { dx: TILE / 2, deskId: back, rank: ranks[i] + 1, side: 'N', order: 0.55 + i * 0.03 });
+    seat('desk', 'office_chair', pair.x, pair.frontY + 1, 'up', chairV, { dx: TILE / 2, deskId: front, rank: ranks[i], side: 'S', order: 0.6 + i * 0.03 });
   }
   furn('trash_bin', 9, 6, undefined, { order: 0.7 });
 
   // ---- canto de reunião (assentos extras para subagentes: banquetas ou poltronas)
+  const meetingX = v.plan === 'collaboration' ? 1 : 10;
+  const leftMeeting = meetingX < 5;
   if (v.meeting === 'table') {
-    furn('meeting_table', 10, 5, undefined, { order: 0.45 });
-    seat('stool', 'stool', 10, 4, 'down', undefined, { order: 0.65 });
-    seat('stool', 'stool', 12, 4, 'down', undefined, { order: 0.66 });
-    seat('stool', 'stool', 10, 7, 'up', undefined, { order: 0.67 });
-    seat('stool', 'stool', 12, 7, 'up', undefined, { order: 0.68 });
+    furn('meeting_table', meetingX, 5, undefined, { order: 0.45 });
+    seat('stool', 'stool', meetingX, 4, 'down', undefined, { order: 0.65 });
+    seat('stool', 'stool', meetingX + 2, 4, 'down', undefined, { order: 0.66 });
+    seat('stool', 'stool', meetingX, 7, 'up', undefined, { order: 0.67 });
+    seat('stool', 'stool', meetingX + 2, 7, 'up', undefined, { order: 0.68 });
   } else if (v.meeting === 'round') {
     // duas mesinhas redondas com duas banquetas cada (em diagonal, para circular entre elas)
-    furn('cafe_table', 11, 4, undefined, { order: 0.45 });
-    seat('stool', 'stool', 10, 4, 'right', undefined, { order: 0.65 });
-    seat('stool', 'stool', 12, 4, 'left', undefined, { order: 0.66 });
-    furn('cafe_table', 11, 7, undefined, { order: 0.46 });
-    seat('stool', 'stool', 10, 7, 'right', undefined, { order: 0.67 });
-    seat('stool', 'stool', 12, 7, 'left', undefined, { order: 0.68 });
+    furn('cafe_table', meetingX + 1, 4, undefined, { order: 0.45 });
+    seat('stool', 'stool', meetingX, 4, 'right', undefined, { order: 0.65 });
+    seat('stool', 'stool', meetingX + 2, 4, 'left', undefined, { order: 0.66 });
+    furn('cafe_table', meetingX + 1, 7, undefined, { order: 0.46 });
+    seat('stool', 'stool', meetingX, 7, 'right', undefined, { order: 0.67 });
+    seat('stool', 'stool', meetingX + 2, 7, 'left', undefined, { order: 0.68 });
   } else {
     // recanto com poltronas e puffs em volta de uma mesa de centro (sem mesa de reunião)
-    rug(9.6, 3.7, 4.8, 4.6, shade(theme.carpet2, 0.25), room.seed + 2);
-    furn('coffee_table', 10, 5, undefined, { order: 0.45 });
-    seat('nook', 'armchair', 9, 5, 'right', undefined, { order: 0.65 }, true);
-    seat('nook', 'armchair', 12, 5, 'left', undefined, { order: 0.66 }, true);
-    seat('nook', 'armchair', 10, 7, 'up', undefined, { order: 0.67 }, true);
-    seat('nook', 'armchair', 11, 7, 'up', undefined, { order: 0.68 }, true);
-    seat('nook', 'armchair', 11, 3, 'down', undefined, { order: 0.69 }, true);
+    rug(Math.max(1, meetingX - 0.4), 3.7, 4.8, 4.6, shade(theme.carpet2, 0.25), room.seed + 2);
+    if (leftMeeting) {
+      furn('coffee_table', meetingX + 1, 5, undefined, { order: 0.45 });
+      seat('nook', 'armchair', meetingX, 5, 'right', undefined, { order: 0.65 }, true);
+      seat('nook', 'armchair', meetingX + 3, 5, 'left', undefined, { order: 0.66 }, true);
+      seat('nook', 'armchair', meetingX + 1, 7, 'up', undefined, { order: 0.67 }, true);
+      seat('nook', 'armchair', meetingX + 2, 7, 'up', undefined, { order: 0.68 }, true);
+      seat('nook', 'armchair', meetingX + 1, 3, 'down', undefined, { order: 0.69 }, true);
+    } else {
+      furn('coffee_table', meetingX, 5, undefined, { order: 0.45 });
+      seat('nook', 'armchair', meetingX - 1, 5, 'right', undefined, { order: 0.65 }, true);
+      seat('nook', 'armchair', meetingX + 2, 5, 'left', undefined, { order: 0.66 }, true);
+      seat('nook', 'armchair', meetingX, 7, 'up', undefined, { order: 0.67 }, true);
+      seat('nook', 'armchair', meetingX + 1, 7, 'up', undefined, { order: 0.68 }, true);
+      seat('nook', 'armchair', meetingX + 1, 3, 'down', undefined, { order: 0.69 }, true);
+    }
   }
 
-  // ---- apoio: estante na parede norte (sem cobrir quadro, placa ou janela) e coluna junto à parede
+  // ---- apoio: estante junto à parede norte (sem cobrir quadro, placa ou janela) e coluna junto à parede
   const tall = pick(PLANTS_TALL);
-  const shelfX = north ? 1 : 4;
-  furn('bookshelf', shelfX, 2, undefined, { order: 0.25 });
-  spot('shelf', shelfX, 3, 'up', { dx: 8, dy: -2 });
+  // Nos planos altos, a estante fica recuada para não projetar o sprite sobre a entrada.
+  // As posições preservam a aproximação da porta nos dois espelhos.
+  const highShelf = v.plan === 'gallery' || v.plan === 'overflow';
+  const shelfX = highShelf ? 8 : north ? 1 : 4;
+  const shelfY = highShelf ? 4 : 2;
+  furn('bookshelf', shelfX, shelfY, undefined, { order: 0.25 });
+  spot('shelf', shelfX, shelfY + 1, 'up', { dx: 8, dy: -2 });
   furn('plant_tall', 14, 2, tall, { order: 0.2 });
   if (north) spot('window', 12, 2, 'up', { dx: 12, dy: 1 });
   else furn('plant_small', 1, 2, pick(PLANTS_SMALL), { order: 0.22 });
@@ -256,8 +339,8 @@ export function layoutProjectRoom(room: RoomInput, theme: RoomTheme): AreaLayout
   }
 
   // pontos em pé (subagentes sem lugar sentado trabalham aqui; também servem de conversa)
-  spot('stand', 9, 3, 'left');
-  spot('stand', 1, 7, 'right');
+  spot('stand', v.plan === 'gallery' || v.plan === 'overflow' ? 10 : 9, 3, 'left');
+  spot('stand', v.plan === 'collaboration' ? 4 : 1, 7, 'right');
   spot('stand', 13, 9, 'up', { dy: -2 });
 
   // ---- sombreamento quando a luz está apagada (salas ao norte: a mureta sul fica clara)

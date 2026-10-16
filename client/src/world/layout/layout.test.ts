@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { FURNITURE, TILE, type FurnitureKind, type RoomTheme } from '../../art/api';
+import { FURNITURE, TILE, type FurnitureKind, type Rect, type RoomTheme } from '../../art/api';
+import { renderFurniture } from '../../art/furniture';
 import { BUILDING_H, COL_W, CORRIDOR_Y, SOUTH_Y } from '../constants';
 import { assembleBuilding, coreAreas } from './building';
 import { columnsFor, slotAt, slotColumn, slotRect, slotSide } from './geometry';
 import { layoutProjectRoom, roomVariant } from './room';
 import { layoutExterior, slotShell } from './exterior';
 import { interiorSlotShell } from './interior';
-import { RECEPTION_ID } from './core';
+import { layoutLounge, RECEPTION_ID } from './core';
 import type { AreaLayout } from './types';
 
 const theme: RoomTheme = {
@@ -179,8 +180,50 @@ function hiddenWallItems(area: AreaLayout): string[] {
   return out;
 }
 
+function majorFurnitureSignature(area: AreaLayout): string {
+  const major = new Set<FurnitureKind>(['desk', 'desk_back', 'meeting_table', 'cafe_table', 'coffee_table']);
+  return area.furniture
+    .filter((f) => major.has(f.kind))
+    .map((f) => `${f.kind}@${f.tx - area.rect.x},${f.ty - area.rect.y}`)
+    .join('|');
+}
+
+// Use the painted extents, including chair backs and tall furniture above their floor tiles.
+const furniturePaint = new Map<string, Rect[]>();
+function furnitureBounds(f: AreaLayout['furniture'][number]): Rect[] {
+  const key = `${f.kind}:${f.variant ?? ''}`;
+  let bounds = furniturePaint.get(key);
+  if (!bounds) {
+    const sprites = renderFurniture(f.kind, f.variant);
+    bounds = [sprites.base, sprites.front].flatMap(s => {
+      const painted = s?.buf.bounds();
+      return s && painted ? [{ ...painted, x: painted.x - s.ax, y: painted.y - s.ay }] : [];
+    });
+    furniturePaint.set(key, bounds);
+  }
+  const { w, h } = FURNITURE[f.kind].footprint;
+  return bounds.map(b => ({ ...b, x: b.x + (f.tx + w / 2) * TILE + (f.dx ?? 0), y: b.y + (f.ty + h) * TILE + (f.dy ?? 0) }));
+}
+
+const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
 describe('variações das salas de projeto', () => {
   const seeds = Array.from({ length: 90 }, (_, i) => (i * 7919 + 13) >>> 0);
+
+  it('mantém o vão visível e a aproximação da porta livres, inclusive nas salas espelhadas', () => {
+    for (const slot of [0, 1]) for (const seed of seeds) {
+      const room = layoutProjectRoom({ id: `/entry/${seed}`, slot, seed }, theme);
+      const door = room.door!;
+      const north = slotSide(slot) === 'north';
+      const visibleDoor = { x: door.x * TILE, y: (door.y - (north ? 0.5 : 0)) * TILE, w: door.w * TILE, h: (door.h + 0.5) * TILE };
+      const approach = { x: door.x, y: north ? door.y - 2 : door.y + door.h, w: door.w, h: 2 };
+      for (const f of room.furniture) {
+        const footprint = FURNITURE[f.kind].footprint;
+        expect(overlaps({ x: f.tx, y: f.ty, ...footprint }, approach), `${f.id} na passagem`).toBe(false);
+        expect(furnitureBounds(f).some(b => overlaps(b, visibleDoor)), `${f.id} cobre a porta`).toBe(false);
+      }
+    }
+  });
 
   it('toda variação é válida: sem sobreposição, tudo alcançável, lugares suficientes', () => {
     for (const slot of [0, 1]) {
@@ -193,7 +236,6 @@ describe('variações das salas de projeto', () => {
           for (let y = f.ty; y < f.ty + def.footprint.h; y++)
             for (let x = f.tx; x < f.tx + def.footprint.w; x++) {
               expect(x >= room.rect.x + 1 && x < room.rect.x + 15 && y >= room.rect.y + 2 && y < room.rect.y + 11, `${f.id} fora do piso`).toBe(true);
-              if (!def.blocks) continue;
               expect(used.get(`${x},${y}`), `${f.id} sobre ${used.get(`${x},${y}`)}`).toBeUndefined();
               used.set(`${x},${y}`, f.id);
             }
@@ -215,6 +257,7 @@ describe('variações das salas de projeto', () => {
 
   it('as salas não são todas iguais: espelhamento, canto de reunião e cantos variam', () => {
     const vs = seeds.map(roomVariant);
+    expect(new Set(vs.map((v) => v.plan)).size).toBe(4);
     expect(new Set(vs.map((v) => v.mirror)).size).toBe(2);
     expect(new Set(vs.map((v) => v.meeting)).size).toBe(3);
     expect(new Set(vs.map((v) => v.left)).size).toBeGreaterThan(1);
@@ -223,6 +266,52 @@ describe('variações das salas de projeto', () => {
     const room = layoutProjectRoom({ id: '/v/x', slot: 0, seed: 42 }, theme);
     expect(room.floors.every((f) => f.kind !== 'tile_white')).toBe(true);
     expect(room.floorTint).toBe(theme.carpet);
+  });
+
+  it('os quatro planos mudam móveis grandes e atmosfera da parede', () => {
+    const byPlan = new Map<string, AreaLayout>();
+    for (const seed of seeds) {
+      const plan = roomVariant(seed).plan;
+      if (!byPlan.has(plan)) byPlan.set(plan, layoutProjectRoom({ id: `/plan/${seed}`, slot: 0, seed }, theme));
+    }
+    expect(byPlan.size).toBe(4);
+    expect(new Set([...byPlan.values()].map(majorFurnitureSignature)).size).toBe(4);
+    expect(new Set([...byPlan.values()].map((a) => a.walls.find((w) => w.kind === 'face')?.style.pattern)).size).toBeGreaterThanOrEqual(3);
+  });
+
+  it('sala vazia/overflow e sala fantasma preservam plano, capacidade e ids relativos', () => {
+    const seed = seeds.find((s) => roomVariant(s).plan === 'overflow')!;
+    const empty = layoutProjectRoom({ id: 'temporary:overflow', slot: 0, seed }, theme);
+    const reload = layoutProjectRoom({ id: 'temporary:overflow', slot: 0, seed }, theme);
+    const ghost = layoutProjectRoom({ id: 'temporary:overflow#mudança1', slot: 0, seed }, theme);
+    expect(majorFurnitureSignature(empty)).toBe(majorFurnitureSignature(ghost));
+    expect(empty.spots.map((s) => s.kind)).toEqual(ghost.spots.map((s) => s.kind));
+    expect(reload.spots.map((s) => s.id)).toEqual(empty.spots.map((s) => s.id));
+    expect(empty.spots.filter((s) => s.kind === 'desk')).toHaveLength(6);
+    expect(empty.spots.filter((s) => s.kind === 'stand').length).toBeGreaterThanOrEqual(3);
+    expect(empty.door).toBeDefined();
+  });
+});
+
+describe('assentos da convivência', () => {
+  it('alinha as poltronas frente a frente com folga visual para a mesa e para a passagem', () => {
+    const lounge = layoutLounge();
+    const table = lounge.furniture.find(f => f.kind === 'meeting_table')!;
+    const seats = lounge.spots.filter(s => s.group === 'debate:library');
+    const north = seats.filter(s => s.dir === 'down');
+    const south = seats.filter(s => s.dir === 'up');
+    expect(north).toHaveLength(2);
+    expect(south).toHaveLength(2);
+    expect(north.map(s => s.tx).sort()).toEqual(south.map(s => s.tx).sort());
+    const seating = lounge.furniture.filter(f => seats.some(s => s.furnitureId === f.id));
+    for (const f of seating) {
+      for (const b of furnitureBounds(f)) for (const t of furnitureBounds(table)) {
+        expect(overlaps(b, { x: t.x - 4, y: t.y - 4, w: t.w + 8, h: t.h + 8 }), `${f.id} colada à mesa`).toBe(false);
+      }
+    }
+    for (const talk of lounge.spots.filter(s => s.group === 'talk:lounge')) {
+      expect(seats.some(s => s.tx === talk.tx && s.ty === talk.ty)).toBe(false);
+    }
   });
 });
 
@@ -238,12 +327,16 @@ describe('escritórios reservados', () => {
       expect(sh.props).toEqual([]);
     }
   });
-  it('usa seis estações de trabalho e decoração de escritório em vez de um segundo lounge', () => {
+  it('mantém a sala temporária como apoio, com decoração limitada e circulação livre', () => {
     for (let slot = 0; slot < 10; slot++) {
       const sh = interiorSlotShell(slot, false);
-      expect(sh.furniture.filter((f) => f.kind === 'desk' || f.kind === 'desk_back')).toHaveLength(6);
-      expect(sh.wallItems.some((w) => w.kind === 'whiteboard')).toBe(true);
-      expect(sh.furniture.some((f) => f.kind === 'bookshelf')).toBe(true);
+      expect(sh.furniture.length).toBeLessThanOrEqual(8);
+      expect(sh.furniture.some((f) => ['desk', 'desk_back', 'meeting_table'].includes(f.kind))).toBe(false);
+      expect(sh.rugs.length).toBeLessThanOrEqual(1);
+      // O centro e a aproximação da entrada ficam livres nos dois lados do corredor.
+      for (const f of sh.furniture) {
+        expect(Math.abs(f.x - (sh.rect.x + 8) * TILE)).toBeGreaterThanOrEqual(2 * TILE);
+      }
       for (let i = 1; i < sh.furniture.length; i++) expect(sh.furniture[i].y).toBeGreaterThanOrEqual(sh.furniture[i - 1].y);
     }
   });
