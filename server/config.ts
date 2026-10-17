@@ -9,7 +9,7 @@ import { parseAllowedHosts } from './http/guard';
 import { parseRemoteConfig, type RemoteConfig } from './http/remote';
 import { parseGithubRepo } from './updates/checker';
 import { tr } from '../shared/i18n';
-import { DISSERO_REPOSITORY } from '../shared/distribution';
+import { DISSERO_REPOSITORY, distributionVersion } from '../shared/distribution';
 
 export interface ServerConfig {
   port: number;
@@ -86,9 +86,9 @@ export function findRoot(from: string): string {
 /** Versão e repositório do package.json. */
 function readPackage(rootDir: string): { version: string; repo?: string } {
   try {
-    const pkg = JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf8')) as { version?: unknown; repository?: unknown };
+    const pkg = JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf8')) as { version?: unknown; repository?: unknown; disserohub?: { revision?: number } };
     const repo = parseGithubRepo(pkg.repository);
-    return { version: typeof pkg.version === 'string' ? pkg.version : '0.0.0', repo: repo === DISSERO_REPOSITORY ? repo : undefined };
+    return { version: typeof pkg.version === 'string' ? distributionVersion({ ...pkg, version: pkg.version }) : '0.0.0', repo: repo === DISSERO_REPOSITORY ? repo : undefined };
   } catch {
     return { version: '0.0.0' };
   }

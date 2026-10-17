@@ -12,9 +12,11 @@ if (!['status', 'export'].includes(mode)) throw new Error('Use status ou export 
 const sourcePath = (path) => (/^(client\/src\/|client\/public\/assets\/brand\/|server\/|shared\/|scripts\/|CUSTOMIZATIONS\.md$)/.test(path) && ['.ts', '.css', '.mjs', '.md', '.svg', '.png'].includes(extname(path))) || ['client/index.html', 'client/public/manifest.webmanifest'].includes(path);
 const changed = lines(git('diff', '--name-only', 'HEAD')).filter(sourcePath);
 const added = lines(git('ls-files', '--others', '--exclude-standard')).filter(sourcePath);
+const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+const version = pkg.disserohub?.revision ? `${pkg.version}.${pkg.disserohub.revision}` : pkg.version;
 const manifest = {
   createdAt: new Date().toISOString(),
-  version: JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version,
+  version,
   baseCommit: git('rev-parse', 'HEAD'),
   canonicalOrigin: git('remote', 'get-url', 'origin') === 'https://github.com/marmottajr/habblaud.git',
   tracked: changed,

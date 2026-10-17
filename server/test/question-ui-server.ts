@@ -28,12 +28,7 @@ hub.start();
 let received = 0;
 registry = new MessageRegistry({ office, codex: { homeOf: () => process.cwd(), run: async job => {
   received++;
-  // Simulate consumption separately from queue acknowledgement, using the actual source parser.
-  setTimeout(() => {
-    pending.reply(job.text);
-    office.setPendingQuestions(id, pending.activities());
-    if (!pending.waiting) office.setStatus(id, 'working');
-  }, 3_000);
+  // Ordinary queue acceptance does not resolve a native Codex question.
   return { ok: true };
 } } });
 registry.start();

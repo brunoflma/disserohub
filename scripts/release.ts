@@ -1,4 +1,4 @@
-// Publica a versão do package.json no GitHub: confere se o CHANGELOG.md tem a seção dela, cria a tag vX.Y.Z e a
+// Publica a versão pública derivada do package.json: confere o CHANGELOG e cria a tag vX.Y.Z[.N] e a
 // release com o texto dessa seção como notas (é o que o Habblaud abre em Configurações › Sobre › Ver o que mudou).
 //   npm run release                -> publica (precisa do gh autenticado)
 //   npm run release -- --dry-run   -> só confere e mostra as notas
@@ -9,7 +9,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { DISSERO_REPOSITORY, UPSTREAM_BASE_VERSION, UPSTREAM_REFERENCE_VERSION, UPSTREAM_REPOSITORY } from '../shared/distribution';
+import { DISSERO_REPOSITORY, distributionVersion, UPSTREAM_BASE_VERSION, UPSTREAM_REFERENCE_VERSION, UPSTREAM_REPOSITORY } from '../shared/distribution';
 import { parseGithubRepo } from '../server/updates/checker';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -24,11 +24,12 @@ export function assertReleaseTarget(repository: unknown, origin: string): void {
 interface ReleasePackage {
   version: string;
   repository?: unknown;
-  disserohub?: { upstreamRepository?: string; upstreamVersion?: string; upstreamReferenceVersion?: string };
+  disserohub?: { revision?: number; upstreamRepository?: string; upstreamVersion?: string; upstreamReferenceVersion?: string };
 }
 
 /** Follow the reviewed official number while retaining the actual engine baseline separately. */
 export function assertVersionAlignment(pkg: ReleasePackage): void {
+  distributionVersion(pkg);
   if (!/^\d+\.\d+\.\d+$/.test(pkg.version) || pkg.version !== UPSTREAM_REFERENCE_VERSION
     || pkg.disserohub?.upstreamReferenceVersion !== UPSTREAM_REFERENCE_VERSION) {
     throw new Error('A versão do DisseroHub deve acompanhar a referência oficial revisada em package.json e shared/distribution.ts.');
@@ -127,7 +128,7 @@ function main(argv: string[]): void {
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as ReleasePackage;
   assertReleaseTarget(pkg.repository, run('git', ['remote', 'get-url', 'origin']));
   assertVersionAlignment(pkg);
-  const version = pkg.version;
+  const version = distributionVersion(pkg);
   const tag = `v${version}`;
   const section = changelogSection(readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8'), version);
   if (!section) fail(`o CHANGELOG.md não tem a seção "## [${version}]" (ou ela está vazia): escreva o que entrou nesta versão.`);
@@ -162,7 +163,7 @@ function main(argv: string[]): void {
     writeFileSync(file, `${notes}\n`);
     run('git', ['tag', '-a', tag, '-m', `Dissero ${tag}`]);
     run('git', ['push', 'origin', tag]);
-    const url = run('gh', ['release', 'create', tag, '--repo', DISSERO_REPOSITORY, '--verify-tag', '--title', `Dissero ${tag}`, '--notes-file', file]);
+    const url = run('gh', ['release', 'create', tag, '--repo', DISSERO_REPOSITORY, '--verify-tag', '--latest', '--title', `Dissero ${tag}`, '--notes-file', file]);
     console.log(`✓ Release publicada: ${url}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -17,10 +17,10 @@
 // auxiliar do host (npm run codex:bridge) busca em POST /api/codex/bridge/poll e confirma em
 // POST /api/codex/bridge/ack. Mesmos estados, prazos e limites; canMessage = há entregador (o binário no modo Node ou
 // o auxiliar visto há até PRESENCE_MS). `delivered` = entrou na fila da sessão (entra quando ela ficar ociosa).
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { truncate } from '../../shared/activity';
 import { describeMessage, MESSAGE_MAX } from '../../shared/messages';
-import { answerSummary, checkAnswers } from '../../shared/answers';
+import { checkAnswers } from '../../shared/answers';
 import { isAsyncQuestion, questionReplyText } from '../../shared/question-replies';
 import type { Activity, AgentInfo, InboxMessage, OutboxMessage, PermissionAnswer } from '../../shared/types';
 import { errMsg, log } from '../log';
@@ -128,7 +128,6 @@ interface Entry {
   via?: 'node' | 'bridge';
   /** Falhou por falta de confirmação: uma confirmação atrasada ainda corrige a situação. */
   late?: boolean;
-  question?: { activityId: string; index: number; fingerprint: string };
 }
 
 type Rec = Record<string, unknown>;
@@ -282,7 +281,7 @@ export class MessageRegistry {
     return { message: out };
   }
 
-  /** A reply is bound to a still-pending question in this exact agent/session. Delivery remains a queue. */
+  /** Compatibility route for older clients. A queued message cannot resolve a native question. */
   answerQuestion(raw: unknown): SendResult {
     const body = rec(raw);
     const agentId = shortStr(body?.agentId, ID_MAX);
@@ -301,23 +300,9 @@ export class MessageRegistry {
     const normalized = checkAnswers([question], [answer as unknown as PermissionAnswer])?.[0];
     const text = normalized && questionReplyText(activity, normalized);
     if (!text) throw new InvalidRequest(tr('resposta inválida para esta pergunta'));
-    const fingerprint = createHash('sha256').update(text).digest('hex');
-    // Repeated clicks/HTTP retries reuse the same receipt instead of submitting a second reply.
-    for (const entry of this.messages.values()) {
-      if (entry.msg.agentId === agentId && entry.target === agent.sessionId && entry.question?.activityId === activityId
-        && entry.question.index === answer.question) {
-        return entry.question.fingerprint === fingerprint ? { message: { ...entry.msg } }
-          : { error: 'unavailable', reason: tr('já existe uma resposta enviada para esta pergunta; confira a entrega antes de alterar') };
-      }
-    }
-    const sent = this.send({ agentId, text });
-    if ('message' in sent) {
-      const entry = this.messages.get(sent.message.id)!;
-      entry.question = { activityId, index: Number(answer.question), fingerprint };
-      entry.activity = { kind: 'communicate', icon: '💬', text: tr('Resposta pelo Dissero'), tool: 'HabblaudMessage',
-        detail: answerSummary([question], [normalized!]) };
-    }
-    return sent;
+    // `codex queue` only queues text; even this envelope leaves the native card unanswered.
+    // Guard older cached pages too: never enqueue a reply or return a false delivery receipt.
+    return { error: 'unavailable', reason: tr('Responda no cartão original do Codex. O canal de mensagens do Dissero não resolve essa pergunta diretamente.') };
   }
 
   /** Situação de uma mensagem (sem o texto), ou undefined. */
@@ -433,12 +418,7 @@ export class MessageRegistry {
     const now = this.now();
     for (const [id, e] of this.messages) {
       if (isFinal(e)) {
-        // A failed queue command can still complete late. Keep the question receipt while
-        // its source remains pending, including after the ordinary message retention window.
-        const agent = e.question && this.opts.office.get(e.msg.agentId);
-        const pending = agent && agent.sessionId === e.target && agent.pendingQuestions?.some(a =>
-          a.id === e.question!.activityId && a.questions?.some(q => q.index === e.question!.index));
-        if (now - e.msg.updatedAt >= this.keepMs && !pending) this.messages.delete(id);
+        if (now - e.msg.updatedAt >= this.keepMs) this.messages.delete(id);
         continue;
       }
       if (e.demo) {

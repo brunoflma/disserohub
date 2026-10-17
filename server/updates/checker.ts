@@ -17,15 +17,17 @@ export const MANUAL_GAP_MS = 30_000;
 const TIMEOUT_MS = 10_000;
 
 interface Version {
-  nums: [number, number, number];
+  nums: [number, number, number, number?];
   pre?: string;
 }
 
-/** "1.2.3", "v1.2.3" ou "1.2.3-beta.1" (sem metadados de build). */
+/** Official x.y.z, Dissero x.y.z.n, or a prerelease (without build metadata). */
 export function parseVersion(v: string): Version | null {
-  const m = /^v?(\d{1,6})\.(\d{1,6})\.(\d{1,6})(?:-([0-9A-Za-z.-]{1,40}))?$/.exec(v.trim());
+  const m = /^v?(\d{1,6})\.(\d{1,6})\.(\d{1,6})(?:\.(\d{1,6}))?(?:-([0-9A-Za-z.-]{1,40}))?$/.exec(v.trim());
   if (!m) return null;
-  return { nums: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] };
+  const nums: Version['nums'] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (m[4] !== undefined) nums.push(Number(m[4]));
+  return { nums, pre: m[5] };
 }
 
 /** <0, 0 ou >0, como no semver; versões ilegíveis contam como iguais. */
@@ -33,7 +35,7 @@ export function compareVersions(a: string, b: string): number {
   const x = parseVersion(a);
   const y = parseVersion(b);
   if (!x || !y) return 0;
-  for (let i = 0; i < 3; i++) if (x.nums[i] !== y.nums[i]) return x.nums[i] - y.nums[i];
+  for (let i = 0; i < 4; i++) if ((x.nums[i] ?? 0) !== (y.nums[i] ?? 0)) return (x.nums[i] ?? 0) - (y.nums[i] ?? 0);
   // Sem pré-lançamento vale mais que com (1.0.0 > 1.0.0-beta).
   if (!x.pre || !y.pre) return (x.pre ? -1 : 0) - (y.pre ? -1 : 0);
   return x.pre < y.pre ? -1 : x.pre > y.pre ? 1 : 0;

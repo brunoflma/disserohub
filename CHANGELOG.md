@@ -10,6 +10,21 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+## [1.0.3.1] - 2026-10-17
+
+### Corrigido
+
+- Perguntas do Codex continuam visíveis no painel, mas o formulário que enviava respostas pela fila comum foi retirado: esse envio deixava o cartão original aberto e podia atrasar a resposta até o fim da tarefa. O servidor também recusa esse caminho em páginas antigas ainda abertas. As respostas diretas do Claude pelo plugin de permissões continuam disponíveis.
+
+### Alterado
+
+- Correções próprias passam a usar um quarto número: 1.0.3.1, 1.0.3.2 e assim por diante, mantendo 1.0.3 como referência oficial revisada. O verificador compara revisões numericamente e reconhece a próxima versão oficial como mais recente.
+
+### Limites conhecidos
+
+- A resposta imediata ao cartão original do Codex pelo Dissero continua pendente de uma integração com o cliente. O canal de mensagens comuns continua sendo uma fila e não resolve esse cartão.
+- Instalações anteriores à 1.0.3.1 precisam receber esta primeira revisão pelo procedimento administrado/manual, pois o verificador antigo reconhece somente três números. A partir desta versão, o verificador reconhece as próximas revisões normalmente.
+
 ## [1.0.3] - 2026-10-16
 
 ### Alterado

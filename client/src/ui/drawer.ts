@@ -332,7 +332,7 @@ class AgentView {
     this.termWhy = h('p', { class: 'ui-term-cta__why', hidden: true, attrs: { role: 'status' } });
 
     this.alertText = h('p', { class: 'ui-alert__text' });
-    this.questionReplies = new QuestionReplies(ctx);
+    this.questionReplies = new QuestionReplies();
     this.alertQuestions = this.questionReplies.el;
     this.alertAnswerHint = h('p', { class: 'ui-ask__answer-hint', hidden: true, text: tr('Com o plugin habblaud-permissoes (npm run mod:install), dá para responder as perguntas por aqui.') });
     const alertIcon = h('span', { class: 'ui-alert__icon', attrs: { 'aria-hidden': 'true' } });
@@ -595,15 +595,13 @@ class AgentView {
       const accName = account?.name ?? a.account;
       // Codex: "Vá ao Codex (Conta X)"; sem repetir quando a conta já se chama "Codex".
       const where = codex ? tr('ao Codex{0}', [/codex/i.test(accName) ? '' : ` (${accName})`]) : tr('ao terminal da {0}', [accName]);
-      setText(this.alertText, pending.some(q => /^(?:functions\.)?request_user_input_async$/.test(q.tool ?? ''))
-        ? tr('Responda abaixo para enviar a resposta à sessão deste agente.')
-        : tr('Vá {0} em {1} para responder{2}', [where, room?.name ?? tr('seu projeto'), a.waitingFor ? `: ${a.waitingFor}` : '.']));
+      setText(this.alertText, tr('Vá {0} em {1} para responder{2}', [where, room?.name ?? tr('seu projeto'), a.waitingFor ? `: ${a.waitingFor}` : '.']));
     }
     // Perguntas pendentes, inclusive quando o Codex continua trabalhando enquanto aguarda a resposta.
     const asking = waiting && !codex && a.activity?.kind === 'ask' ? a.activity : undefined;
     this.questionReplies.render(live, codex ? pending : asking ? [asking] : []);
     // Perguntas do Claude sem pedido no escritório dependem do plugin de permissões.
-    // As perguntas assíncronas do Codex usam o formulário acima e o canal da própria sessão.
+    // O canal de mensagens do Codex não resolve o cartão nativo de pergunta.
     const answerable =
       !codex && !!asking?.questions?.length && !this.perm.visible && !this.ctx.store.mock && !!this.ctx.store.snapshot?.meta.terminal && access().permissions;
     setHidden(this.alertAnswerHint, !answerable);

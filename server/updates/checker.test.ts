@@ -61,6 +61,15 @@ describe('versões', () => {
     expect(compareVersions('1.0.0-alpha', '1.0.0-beta')).toBeLessThan(0);
     expect(compareVersions('lixo', '1.0.0')).toBe(0);
   });
+
+  it('orders Dissero revisions numerically and resets them at the next official version', () => {
+    expect(parseVersion('v1.0.3.1')).toEqual({ nums: [1, 0, 3, 1], pre: undefined });
+    expect(compareVersions('1.0.3.1', '1.0.3')).toBeGreaterThan(0);
+    expect(compareVersions('1.0.3.10', '1.0.3.9')).toBeGreaterThan(0);
+    expect(compareVersions('1.0.4', '1.0.3.999')).toBeGreaterThan(0);
+    expect(compareVersions('1.0.3', '1.0.3.1')).toBeLessThan(0);
+    expect(parseVersion('1.0.3.1.1')).toBeNull();
+  });
 });
 
 describe('parseGithubRepo', () => {
@@ -83,6 +92,13 @@ describe('parseGithubRepo', () => {
 });
 
 describe('UpdateChecker', () => {
+  it('offers the first local revision over an official-numbered distribution', async () => {
+    const release = { ...RELEASE, tag_name: 'v1.0.3.1' };
+    const c = make({ current: '1.0.3', fetch: fakeFetch([json(release)]).fetch });
+    expect(await c.check()).toMatchObject({ latest: '1.0.3.1', available: true });
+    const installed = make({ current: '1.0.3.1', fetch: fakeFetch([json(release)]).fetch });
+    expect(await installed.check()).toMatchObject({ latest: '1.0.3.1', available: false });
+  });
   it('release mais nova: available, link e data; avisa a mudança', async () => {
     const f = fakeFetch([json(RELEASE, { headers: { ETag: 'W/"abc"' } })]);
     let changes = 0;

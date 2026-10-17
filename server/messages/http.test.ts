@@ -288,19 +288,16 @@ describe('responder perguntas do Codex pelo cartão', () => {
     return deliveries;
   }
 
-  it('queues the identified answer, reuses receipts and preserves pending questions until source confirmation', async () => {
+  it('rejects cached question forms without queueing an envelope or clearing the pending question', async () => {
     const deliveries = await prepare();
     const first = await post(srv!, '/api/messages/answer', body());
-    expect(first.status).toBe(201);
-    const receipt = first.json as OutboxMessage;
-    expect((await post(srv!, '/api/messages/answer', body())).json).toMatchObject({ id: receipt.id });
+    expect(first.status).toBe(409);
+    expect(first.text).toContain('cartão original do Codex');
+    expect((await post(srv!, '/api/messages/answer', body())).status).toBe(409);
     expect((await post(srv!, '/api/messages/answer', body('Uma resposta diferente'))).status).toBe(409);
     await sleep(20);
-    expect(deliveries).toHaveLength(1);
-    const encoded = JSON.parse(deliveries[0].split('\n')[1]);
-    expect(JSON.parse(encoded.questionItemId)).toEqual([activity.tool, 'call-one', 1]);
-    expect(encoded.answer).toBe('Pode seguir com o teste');
-    expect(srv!.registry!.get(receipt.id)?.status).toBe('delivered');
+    expect(deliveries).toHaveLength(0);
+    expect(srv!.registry!.size).toBe(0);
     expect(srv!.office.get(id)?.pendingQuestions).toEqual([activity]);
     srv!.office.setPendingQuestions(id, []);
     expect((await post(srv!, '/api/messages/answer', body())).status).toBe(409);
@@ -317,9 +314,9 @@ describe('responder perguntas do Codex pelo cartão', () => {
       { ...body(), answer: { question: 1, other: 'x'.repeat(2_001) } },
     ]) expect([400, 409]).toContain((await post(srv!, '/api/messages/answer', invalid)).status);
     expect(deliveries).toHaveLength(0);
-    expect((await post(srv!, '/api/messages/answer', { ...body(), answer: { question: 0, options: [2] } })).status).toBe(201);
+    expect((await post(srv!, '/api/messages/answer', { ...body(), answer: { question: 0, options: [2] } })).status).toBe(409);
     await sleep(20);
-    expect(JSON.parse(deliveries[0].split('\n')[1]).answer).toBe('Texto');
+    expect(deliveries).toHaveLength(0);
   });
 
   it('does not queue an answer to a blocking request_user_input', async () => {

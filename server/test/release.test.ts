@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { changelogSection, parseReleaseArgs, unwrapMarkdown } from '../../scripts/release';
+import { distributionVersion } from '../../shared/distribution';
 
 const ROOT = join(import.meta.dirname, '..', '..');
 
@@ -30,6 +31,7 @@ describe('changelogSection', () => {
   it('pega só o texto da versão pedida', () => {
     expect(changelogSection(SAMPLE, '0.3.0')).toBe('### Adicionado\n\n- Coisa nova.');
     expect(changelogSection(SAMPLE, '0.2.0')).toBe('- Primeira.');
+    expect(changelogSection('## [1.0.3.1]\n\n- Correção.\n\n## [1.0.3]\n\n- Base.', '1.0.3.1')).toBe('- Correção.');
   });
 
   it('sem seção ou com seção vazia: undefined', () => {
@@ -63,7 +65,7 @@ describe('parseReleaseArgs', () => {
 
 describe('CHANGELOG.md', () => {
   it('tem a seção da versão do package.json (toda versão precisa dizer o que entrou)', () => {
-    const { version } = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string };
+    const version = distributionVersion(JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')));
     const notes = changelogSection(readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8'), version);
     expect(notes, `escreva a seção "## [${version}]" no CHANGELOG.md`).toBeTruthy();
   });
