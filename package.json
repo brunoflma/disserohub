@@ -10,7 +10,7 @@
   },
   "homepage": "https://github.com/brunoflma/disserohub#readme",
   "disserohub": {
-    "revision": 1,
+    "revision": 2,
     "upstreamRepository": "marmottajr/habblaud",
     "upstreamVersion": "0.11.0",
     "upstreamReferenceVersion": "1.0.3"
@@ -47,6 +47,7 @@
     "codex:uninstall": "tsx scripts/codex-install.ts uninstall",
     "codex:status": "tsx scripts/codex-install.ts status",
     "codex:bridge": "tsx scripts/codex-bridge.ts",
+    "questions:install": "node scripts/questions-install.mjs",
     "remote:setup": "tsx scripts/remote-setup.ts",
     "remote:mdns": "tsx scripts/remote-mdns.ts",
     "release": "tsx scripts/release.ts",

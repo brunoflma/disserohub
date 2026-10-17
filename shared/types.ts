@@ -618,6 +618,8 @@ export interface PermissionSuggestionInfo {
  */
 export interface PermissionRequestInfo {
   id: string;
+  /** A local MCP call is waiting for this answer; it never uses the message queue. */
+  channel?: 'direct';
   /** Ferramenta de quem pediu; ausente = 'claude'. */
   provider?: Provider;
   /** Nome bruto da ferramenta (ex.: "Bash", "Edit", "mcp__github__create_issue"). */

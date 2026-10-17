@@ -10,6 +10,18 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+## [1.0.3.2] - 2026-10-17
+
+### Adicionado
+
+- Canal local MCP `dissero-perguntas` para perguntas com resposta direta no cartão do agente. A resposta conclui a própria chamada que está aguardando, sem fila de mensagens. Inclui alternativas, texto livre, cancelamento, prazo e vínculo à sessão original.
+- Instalador dedicado para Codex e Claude Code, preservando outras integrações e sessões em execução. O cliente precisa carregar o novo MCP para oferecer `ask_user` ao agente.
+
+### Compatibilidade
+
+- Perguntas feitas com a nova ferramenta usam o canal direto. Cartões nativos já abertos no aplicativo continuam no cliente de origem; não são considerados respondidos pelo novo canal.
+- Esta versão está em desenvolvimento local e ainda não foi publicada.
+
 ## [1.0.3.1] - 2026-10-17
 
 ### Corrigido

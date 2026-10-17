@@ -38,6 +38,13 @@ function agent(id: string, permission?: Partial<PermissionRequestInfo>, status: 
 }
 
 describe('responder pelo escritório (peças puras)', () => {
+  it('direct Codex questions show answers without exposing tool-approval controls', () => {
+    expect(isQuestionRequest({ provider: 'codex', channel: 'direct', tool: 'AskUserQuestion',
+      questions: [{ index: 0, question: 'Continuar?', options: [] }] })).toBe(true);
+    expect(permissionOptions({ provider: 'codex', channel: 'direct' }, { kind: 'main' })).toMatchObject({
+      always: false, interrupt: false, reasonRequired: false, note: expect.stringContaining('diretamente'),
+    });
+  });
   it('expiryText: quanto falta para o pedido voltar ao terminal', () => {
     expect(expiryText(10 * 60_000, 0)).toBe('volta ao terminal em 10 min');
     expect(expiryText(30_000, 0)).toBe('volta ao terminal em menos de 1 min');

@@ -80,6 +80,56 @@ const ASK_INPUT = {
 
 const askInput = (over: Record<string, unknown> = {}) => hookInput({ tool_name: 'AskUserQuestion', tool_input: ASK_INPUT, permission_suggestions: [], ...over });
 
+describe('direct questions', () => {
+  const body = (session = SESSION, provider = 'claude') => ({ provider, session_id: session,
+    request_key: 'direct-test-request-0001', questions: [{ question: 'Continuar?', options: [{ label: 'Sim' }, { label: 'Não' }] }] });
+
+  it.each(['claude', 'codex'])('delivers %s answers to the live waiter before a turn ends', async provider => {
+    const { office, registry } = setup();
+    const session = provider === 'codex' ? 'codex-session' : SESSION;
+    const agentId = provider === 'codex' ? 'codex:main' : MAIN;
+    if (provider === 'codex') office.addMain({ id: agentId, provider: 'codex', account: 'codex', sessionId: session,
+      cwd: '/synthetic', role: 'Teste', startedAt: 0, status: 'working' });
+    const id = registered(registry.registerQuestion(body(session, provider)));
+    expect(snapAgent(office, agentId)).toMatchObject({ status: 'waiting', permission: { channel: 'direct', questions: [{ question: 'Continuar?' }] } });
+    const waiter = registry.wait(id, 25_000)!;
+    expect(registry.decide(id, { behavior: 'allow' })).toBe('invalid-answer');
+    expect(registry.decide(id, { behavior: 'answer', answers: [{ question: 0, options: [0] }] })).toBe('ok');
+    expect(await waiter.result).toEqual({ status: 'decided', behavior: 'answer', answers: [{ question: 0, options: [0] }] });
+    expect(office.get(agentId)?.status).toBe('working');
+    expect(snapAgent(office, agentId)?.permission).toBeUndefined();
+    expect(registry.decide(id, { behavior: 'answer', answers: [{ question: 0, options: [1] }] })).toBe('conflict');
+    expect(registered(registry.registerQuestion(body(session, provider)))).toBe(id);
+    expect((await registry.wait(id, 0)!.result).status).toBe('decided');
+  });
+
+  it('does not infer a session by project or let another session reuse a receipt', () => {
+    const { office, registry } = setup();
+    expect(() => registry.registerQuestion({ ...body(), session_id: undefined, provider: 'codex' })).toThrow(/session_id/);
+    expect(registry.registerQuestion(body('unknown'))).toEqual({ skip: 'unknown-session' });
+    registered(registry.registerQuestion(body()));
+    office.addMain({ id: 'other:2', account: 'acc', sessionId: 'other', cwd: '/p/loja', role: 'Teste', startedAt: 0, status: 'working' });
+    expect(() => registry.registerQuestion(body('other'))).toThrow(/request_key/);
+  });
+
+  it('does not mistake transcript activity for an answer and rejects a replaced session', async () => {
+    const { office, registry, clock } = setup();
+    const id = registered(registry.registerQuestion(body()));
+    const waiter = registry.wait(id, 25_000)!;
+    office.setStatus(MAIN, 'waiting'); registry.tick();
+    office.setStatus(MAIN, 'working'); clock.advance(4000); registry.tick();
+    expect(registry.size).toBe(1);
+    office.switchSession(MAIN, 'replacement');
+    expect(registry.decide(id, { behavior: 'answer', answers: [{ question: 0, options: [0] }] })).toBe('conflict');
+    expect(await waiter.result).toEqual({ status: 'released', reason: 'gone' });
+  });
+
+  it('keeps the original payload authoritative for reused request keys', () => {
+    const { registry } = setup(); registered(registry.registerQuestion(body()));
+    expect(() => registry.registerQuestion({ ...body(), questions: [{ question: 'Outra pergunta?' }] })).toThrow(/request_key/);
+  });
+});
+
 describe('PermissionRegistry: registro', () => {
   it('sem página local aberta, com sessão desconhecida ou AskUserQuestion sem perguntas para mostrar: não desvia (skip)', () => {
     const { registry, setViewers } = setup({ viewers: 0 });

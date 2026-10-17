@@ -61,7 +61,9 @@ export interface PermissionOptions {
   note: string;
 }
 
-export function permissionOptions(p: Pick<PermissionRequestInfo, 'provider' | 'suggestions'>, agent: Pick<AgentInfo, 'kind' | 'background'>): PermissionOptions {
+export function permissionOptions(p: Pick<PermissionRequestInfo, 'provider' | 'suggestions' | 'channel'>, agent: Pick<AgentInfo, 'kind' | 'background'>): PermissionOptions {
+  if (p.channel === 'direct') return { always: false, interrupt: false, reasonRequired: false, seconds: false,
+    note: tr('Sua resposta volta diretamente à chamada deste agente, sem entrar na fila de mensagens.') };
   if (p.provider === 'codex') return { always: false, interrupt: false, reasonRequired: true, seconds: true, note: CODEX_PERMISSION_NOTE };
   // Subagente em segundo plano: o Claude Code só mostra o diálogo depois que o hook responde.
   const blocking = agent.kind === 'sub' && !!agent.background;
@@ -97,8 +99,8 @@ export function focusPermission(ctx: UiContext, agentId: string): void {
 export const isLocalHostname = isLoopbackHostname;
 
 /** Pedido que se responde escolhendo (as perguntas do AskUserQuestion), não aprovando. O Codex nunca pergunta. */
-export function isQuestionRequest(p: Pick<PermissionRequestInfo, 'tool' | 'questions' | 'provider'> | undefined): boolean {
-  return !!p && p.provider !== 'codex' && p.tool === ASK_TOOL && !!p.questions?.length;
+export function isQuestionRequest(p: Pick<PermissionRequestInfo, 'tool' | 'questions' | 'provider' | 'channel'> | undefined): boolean {
+  return !!p && (p.channel === 'direct' || p.provider !== 'codex') && p.tool === ASK_TOOL && !!p.questions?.length;
 }
 
 /** O que está marcado numa pergunta do cartão: as opções (posições do original) e o "Outro" (marcado, e o texto). */
@@ -337,11 +339,12 @@ export class PermissionCard {
     }
     setText(this.title, ask ? (p.questions!.length > 1 ? tr('Perguntas para você') : tr('Pergunta para você')) : tr('Pede permissão'));
     const by = p.subagent ? tr(' · subagente {0}', [p.subagent]) : '';
-    setText(this.what, ask ? tr('Aqui ou no terminal: vale a primeira resposta{0}', [by]) :`${p.icon} ${p.text}${by}`);
-    setText(this.timer, expiryText(p.expiresAt, now, opts.seconds));
+    const direct = p.channel === 'direct';
+    setText(this.what, direct ? tr('O agente aguarda sua resposta aqui{0}', [by]) : ask ? tr('Aqui ou no terminal: vale a primeira resposta{0}', [by]) :`${p.icon} ${p.text}${by}`);
+    setText(this.timer, direct ? tr('Prazo: {0}', [formatClock(p.expiresAt)]) : expiryText(p.expiresAt, now, opts.seconds));
     setTitle(
       this.timer,
-      codex
+      direct ? tr('Sem resposta até {0}, a chamada encerra sem resposta.', [formatClock(p.expiresAt)]) : codex
         ? tr('Pedido feito às {0}. Sem resposta aqui até {1}, o Codex segue sem a decisão do escritório e pede a aprovação no terminal.', [formatClock(p.createdAt), formatClock(p.expiresAt)])
         : tr('Pedido feito às {0}. Sem resposta aqui até {1}, o Dissero devolve o pedido ao terminal.', [formatClock(p.createdAt), formatClock(p.expiresAt)]),
     );
@@ -382,8 +385,9 @@ export class PermissionCard {
     setTitle(this.denyBtn, ask ? tr('Não responder: o agente segue sem a resposta (com o motivo, se você escrever um)') : codex ? tr('Recusar com um motivo (o Codex pede um)') : '');
     setTitle(
       this.terminalBtn,
-      codex ? tr('O Dissero solta o pedido agora: o Codex mostra a aprovação no terminal') : tr('O Dissero deixa este pedido de lado: vale o que você responder no terminal'),
+      direct ? tr('Encerrar esta pergunta sem enviar uma resposta') : codex ? tr('O Dissero solta o pedido agora: o Codex mostra a aprovação no terminal') : tr('O Dissero deixa este pedido de lado: vale o que você responder no terminal'),
     );
+    setText(this.terminalBtn, direct ? tr('Cancelar pergunta') : tr('Responder no terminal'));
     this.suggestions.sync(opts.always ? (p.suggestions ?? []) : []);
     for (const b of this.suggestions.container.querySelectorAll('button')) b.disabled = busy;
     setHidden(this.always, ask || !opts.always || this.phase === 'deny');

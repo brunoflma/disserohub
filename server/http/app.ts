@@ -131,6 +131,7 @@ function sameProjectOrigin(req: IncomingMessage): boolean {
 function isLocalOnlyPath(path: string): boolean {
   return (
     path === '/api/permissions' ||
+    path === '/api/permissions/questions' ||
     /^\/api\/permissions\/[^/]+\/wait$/.test(path) ||
     path === '/api/mod/inbox' ||
     path === '/api/mod/inbox/ack' ||

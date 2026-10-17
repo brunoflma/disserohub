@@ -130,6 +130,7 @@ interface AskFormat {
 interface Pending {
   /** Versão completa (com `input`): GET /api/permissions/:id. */
   info: PermissionRequestInfo;
+  directKey?: string;
   /** Pedido do Codex (sem a busca da resposta no transcript). */
   codex?: boolean;
   /** Pergunta (AskUserQuestion): o formato de `tool_input.questions`, por posição (undefined = entrada inválida). */
@@ -167,8 +168,8 @@ function isIndex(v: unknown): v is number {
 }
 
 /** Pedido que se responde com `answer` (as perguntas do AskUserQuestion; o Codex não as manda pelo hook). */
-function isQuestion(info: { tool: string; provider?: string }): boolean {
-  return info.tool === ASK_TOOL && info.provider !== 'codex';
+function isQuestion(info: { tool: string; provider?: string; channel?: string }): boolean {
+  return info.tool === ASK_TOOL && (info.channel === 'direct' || info.provider !== 'codex');
 }
 
 /** O Codex não aceita interromper nem "sempre permitir" (o hook dele só aprova ou recusa com motivo). */
@@ -392,11 +393,35 @@ export class PermissionRegistry {
    * demais. Corpo inválido: lança InvalidRequest.
    */
   register(raw: unknown): RegisterResult {
+    return this.registerInput(raw);
+  }
+
+  /** Direct questions are only answers, never tool approvals. No session is guessed by project. */
+  registerQuestion(raw: unknown): RegisterResult {
+    const body = rec(raw);
+    if (!body || !['codex', 'claude'].includes(String(body.provider))) throw new InvalidRequest('provider deve ser codex ou claude');
+    const key = shortStr(body.request_key, 200);
+    if (!key || !/^[a-zA-Z0-9:._-]{16,200}$/.test(key)) throw new InvalidRequest('request_key inválido');
+    let session = shortStr(body.session_id, 200);
+    if (!session && body.provider === 'claude' && Number.isSafeInteger(body.client_pid) && Number(body.client_pid) > 0) {
+      const matches = this.opts.office.list().filter(a => a.provider !== 'codex' && a.kind === 'main'
+        && a.id.endsWith(`:${body.client_pid}`) && present(a));
+      if (matches.length === 1) session = matches[0].sessionId;
+    }
+    if (!session) throw new InvalidRequest('informe o session_id da própria sessão; no Codex, use CODEX_THREAD_ID');
+    const candidates = this.opts.office.list().filter(a => present(a) && a.kind === 'main' && a.sessionId === session
+      && (a.provider === 'codex') === (body.provider === 'codex'));
+    if (candidates.length !== 1 || candidates[0].kind !== 'main') return { skip: 'unknown-session' };
+    return this.registerInput({ provider: body.provider, session_id: session, tool_name: ASK_TOOL,
+      tool_input: { questions: body.questions }, timeout_ms: body.timeout_ms }, key);
+  }
+
+  private registerInput(raw: unknown, directKey?: string): RegisterResult {
     const req = parseHookInput(raw);
     const codex = req.provider === 'codex';
-    const desc = codex ? codexToolView(req.tool, req.input, req.cwd) : describeTool(req.tool, req.input);
+    const desc = codex && !directKey ? codexToolView(req.tool, req.input, req.cwd) : describeTool(req.tool, req.input);
     const questions = 'questions' in desc ? desc.questions : undefined;
-    const ask = isQuestion(req);
+    const ask = !!directKey || isQuestion(req);
     // Pergunta: todas precisam aparecer no escritório (o hook só responde se cada uma tiver resposta).
     if (ask && (!questions?.length || questions.length !== askCount(req.input.questions))) return { skip: 'unsupported-tool' };
     if (this.opts.viewers() <= 0) return { skip: 'no-viewers' };
@@ -404,6 +429,14 @@ export class PermissionRegistry {
       ? this.resolveCodexAgent(req.sessionId, req.agentId, req.agentType, this.opts.codexAccount?.(req.account, req.codexHome) ?? req.account)
       : this.resolveAgent(req.sessionId, req.agentId, req.agentType);
     if (!target) return { skip: 'unknown-session' };
+    const signature = callSignature(req.tool, req.input);
+    if (directKey) for (const previous of this.pending.values()) {
+      if (previous.directKey !== directKey) continue;
+      if (previous.agentId !== target.id || previous.sessionId !== req.sessionId || previous.signature !== signature) {
+        throw new InvalidRequest('request_key já usado por outra pergunta ou sessão');
+      }
+      return { id: previous.info.id, expiresAt: previous.info.expiresAt + EXPIRY_GRACE_MS };
+    }
     if (this.size >= this.maxPending) return { skip: 'too-many' };
 
     const now = this.now();
@@ -411,6 +444,7 @@ export class PermissionRegistry {
     // Codex: título, resumo e argumentos pelos nomes de ferramenta dele (permissions/codex.ts).
     const view = 'title' in desc ? desc : toolView(req.tool, req.input, req.cwd);
     const info: PermissionRequestInfo = { id, tool: req.tool, title: view.title, text: desc.text, icon: desc.icon, createdAt: now, expiresAt: now + req.timeoutMs };
+    if (directKey) info.channel = 'direct';
     if (codex) info.provider = 'codex';
     if (view.input) info.input = view.input;
     if (view.inputKind) info.inputKind = view.inputKind;
@@ -421,9 +455,10 @@ export class PermissionRegistry {
 
     const p: Pending = {
       info,
+      directKey,
       agentId: target.id,
       sessionId: req.sessionId,
-      signature: codex ? '' : callSignature(req.tool, req.input),
+      signature: codex && !directKey ? '' : signature,
       lastScanAt: 0,
       waiters: new Set(),
       idleSince: now,
@@ -485,7 +520,7 @@ export class PermissionRegistry {
     if (p.outcome) {
       const outcome = p.outcome;
       // Entregue: não precisa mais guardar.
-      this.pending.delete(id);
+      if (!p.directKey) this.pending.delete(id);
       return { result: Promise.resolve(outcome), cancel: () => {} };
     }
     let waiter: Waiter | undefined;
@@ -508,6 +543,13 @@ export class PermissionRegistry {
       return this.opts.demoDecide?.(id, d) ? 'ok' : 'not-found';
     }
     if (p.outcome) return 'conflict';
+    if (p.directKey) {
+      const agent = this.opts.office.get(p.agentId);
+      if (!present(agent) || agent.sessionId !== p.sessionId) {
+        this.release(p, 'gone');
+        return 'conflict';
+      }
+    }
     if (unsupportedByCodex(p.info, d)) return 'unsupported';
     if (d.suggestion !== undefined && !p.info.suggestions?.some((s) => s.index === d.suggestion)) return 'invalid';
     if (d.behavior === 'terminal') {
@@ -551,15 +593,16 @@ export class PermissionRegistry {
     const unwatched = this.unwatchedSince !== null && now - this.unwatchedSince >= UNWATCHED_MS && !this.opts.answerLater?.();
     for (const [id, p] of this.pending) {
       if (p.outcome) {
-        if (now - (p.resolvedAt ?? now) >= this.resolvedKeepMs) this.pending.delete(id);
+        if (now - (p.resolvedAt ?? now) >= (p.directKey ? Math.max(this.resolvedKeepMs, DEFAULT_TIMEOUT_MS) : this.resolvedKeepMs)) this.pending.delete(id);
         continue;
       }
       if (now >= p.info.expiresAt + EXPIRY_GRACE_MS) this.release(p, 'expired');
       else if (!p.waiters.size && now - p.idleSince >= this.orphanMs) this.release(p, 'orphan');
       else if (!present(this.opts.office.get(p.agentId))) this.release(p, 'gone');
+      else if (p.directKey && this.opts.office.get(p.agentId)?.sessionId !== p.sessionId) this.release(p, 'gone');
       else if (unwatched && p.info.expiresAt - p.info.createdAt > DEFAULT_TIMEOUT_MS) this.release(p, 'unwatched');
       // No Codex o terminal só pede a aprovação depois que o hook termina: não há resposta dada lá para procurar.
-      else if (p.codex) continue;
+      else if (p.codex || p.directKey) continue;
       else if (now - p.lastScanAt >= SCAN_EVERY_MS && this.answeredInTerminal(p, now)) this.release(p, 'answered');
       else if (this.leftWaiting(p, now)) this.release(p, 'answered');
     }
@@ -659,7 +702,7 @@ export class PermissionRegistry {
     const delivered = p.waiters.size > 0;
     for (const w of [...p.waiters]) this.dropWaiter(p, w, outcome);
     // Entregue a quem esperava: some já; senão fica guardado até o hook voltar (ou RESOLVED_KEEP_MS).
-    if (delivered) this.pending.delete(p.info.id);
+    if (delivered && !p.directKey) this.pending.delete(p.info.id);
     this.opts.office.markDirty();
   }
 

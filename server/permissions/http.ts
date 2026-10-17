@@ -33,9 +33,9 @@ export function waitMs(url: URL): number {
 }
 
 export function createPermissionRoutes(registry: PermissionRegistry): (req: IncomingMessage, res: ServerResponse, path: string) => void {
-  const register = async (req: IncomingMessage, res: ServerResponse) => {
+  const register = async (req: IncomingMessage, res: ServerResponse, direct = false) => {
     const body = await readJson(req);
-    const r = registry.register(body);
+    const r = direct ? registry.registerQuestion(body) : registry.register(body);
     if ('skip' in r) sendJson(res, 200, { skip: r.skip });
     else sendJson(res, 201, r);
   };
@@ -79,9 +79,9 @@ export function createPermissionRoutes(registry: PermissionRegistry): (req: Inco
 
   return (req, res, path) => {
     const method = req.method ?? 'GET';
-    if (path === '/api/permissions') {
+    if (path === '/api/permissions' || path === '/api/permissions/questions') {
       if (method !== 'POST') return methodNotAllowed(res, 'POST');
-      register(req, res).catch((err) => fail(res, err));
+      register(req, res, path === '/api/permissions/questions').catch((err) => fail(res, err));
       return;
     }
     const m = ITEM.exec(path);

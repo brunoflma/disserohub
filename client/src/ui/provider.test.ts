@@ -78,6 +78,7 @@ describe('ferramenta (Claude Code ou Codex)', () => {
     const p = { id: 'p', tool: 'Bash', title: 'Bash(ls)', text: 'Listando', icon: '💻', createdAt: 0, expiresAt: 25_000 };
     const snap = (agents: AgentInfo[]) => ({ agents }) as Pick<OfficeSnapshot, 'agents'>;
     expect(hasCodexPermission(snap([agent({ ...p, provider: 'codex' })]))).toBe(true);
+    expect(hasCodexPermission(snap([agent({ ...p, provider: 'codex', channel: 'direct' })]))).toBe(false);
     expect(hasCodexPermission(snap([agent(p)]))).toBe(false);
     expect(hasCodexPermission(snap([agent({ ...p, provider: 'codex' }, 'offline')]))).toBe(false);
     expect(hasCodexPermission(null)).toBe(false);

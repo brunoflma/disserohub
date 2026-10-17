@@ -73,7 +73,7 @@ export function emptyOfficeHint(accounts: readonly Pick<AccountInfo, 'short' | '
 
 /** Algum pedido de permissão do Codex esperando: o prazo é curto e o cartão conta os segundos (relógio de 1 s). */
 export function hasCodexPermission(snap: Pick<OfficeSnapshot, 'agents'> | null): boolean {
-  return !!snap?.agents.some((a) => a.permission && isCodex(a.permission) && a.status !== 'offline' && a.status !== 'done');
+  return !!snap?.agents.some((a) => a.permission && a.permission.channel !== 'direct' && isCodex(a.permission) && a.status !== 'offline' && a.status !== 'done');
 }
 
 /** Como ver o Codex ao vivo e aprovar pelo escritório (gaveta de um agente do Codex e ajuda). */
