@@ -20,7 +20,7 @@ do meio (0.**3**.0).
 ### Compatibilidade
 
 - Perguntas feitas com a nova ferramenta usam o canal direto. Cartões nativos já abertos no aplicativo continuam no cliente de origem; não são considerados respondidos pelo novo canal.
-- Esta versão está em desenvolvimento local e ainda não foi publicada.
+- Para habilitar o canal, execute `npm run questions:install -- --provider both --port 4748` e recarregue os MCPs ou abra uma nova sessão no cliente. Ajuste a porta para a instalação local.
 
 ## [1.0.3.1] - 2026-10-17
 
