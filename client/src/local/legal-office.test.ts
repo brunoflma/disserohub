@@ -57,7 +57,9 @@ describe('legal office presentation', () => {
     expect(restroom.spots.some((s) => s.seated)).toBe(false);
     expect(restroom.furniture.some((f) => ['bench', 'armchair', 'sofa', 'cafe_chair', 'stool', 'beanbag'].includes(f.kind))).toBe(false);
     expect(layoutCafe().spots.filter((s) => s.kind === 'cafe_seat')).toHaveLength(6);
-    expect(layoutReception().spots.filter((s) => s.seated)).toHaveLength(5);
+    const reception = layoutReception();
+    expect(reception.spots.filter((s) => s.seated && s.kind !== 'reception_staff')).toHaveLength(5);
+    expect(reception.spots.filter((s) => s.seated && s.kind === 'reception_staff')).toHaveLength(1);
     expect(layoutLounge().spots.filter((s) => s.group === 'debate:library')).toHaveLength(4);
   });
   it('keeps project capacity, work spots and legal decoration across layouts', () => {
