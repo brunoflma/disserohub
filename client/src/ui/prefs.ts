@@ -27,6 +27,7 @@ export interface UiPrefs {
   drawerWidth: number;
   feedHeight: number;
   economy: boolean;
+  ambientLife: boolean;
   cameraView: { x: number; y: number; zoom: number; cols: number; width: number; height: number; mode: 'overview' | 'offices' | 'manual' } | null;
   /** Contas ocultas na barra lateral (AccountInfo.id). */
   hiddenAccounts: string[];
@@ -48,6 +49,7 @@ export const DEFAULT_PREFS: UiPrefs = {
   drawerWidth: 380,
   feedHeight: 200,
   economy: false,
+  ambientLife: true,
   cameraView: null,
   hiddenAccounts: [],
 };
@@ -88,6 +90,7 @@ export function sanitizePrefs(raw: unknown): UiPrefs {
     drawerWidth: dimension(o.drawerWidth, d.drawerWidth, 300, 520),
     feedHeight: dimension(o.feedHeight, d.feedHeight, 120, 360),
     economy: bool(o.economy, d.economy),
+    ambientLife: bool(o.ambientLife, d.ambientLife),
     cameraView: cameraView(o.cameraView),
     hiddenAccounts: Array.isArray(o.hiddenAccounts) ? o.hiddenAccounts.filter((x): x is string => typeof x === 'string').slice(0, 20) : [],
   };
@@ -114,7 +117,7 @@ export function savePrefs(storage: StorageLike | null, prefs: UiPrefs): void {
 
 /** Parte das preferências que o mundo (canvas) consome. */
 export function worldOptionsFrom(p: UiPrefs): Partial<WorldOptions> {
-  return { showNames: p.showNames, bubbles: p.bubbles, liveliness: p.liveliness, dayNight: p.daylight !== 'day', daylight: p.daylight, theme: p.theme, economy: p.economy, legalOffice: true };
+  return { showNames: p.showNames, bubbles: p.bubbles, liveliness: p.liveliness, dayNight: p.daylight !== 'day', daylight: p.daylight, theme: p.theme, economy: p.economy, ambientLife: p.ambientLife, legalOffice: true };
 }
 
 /** localStorage com proteção contra navegadores que lançam exceção ao acessá-lo. */

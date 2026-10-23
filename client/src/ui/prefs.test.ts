@@ -54,7 +54,7 @@ describe('preferências', () => {
     expect(() => savePrefs(broken, DEFAULT_PREFS)).not.toThrow();
   });
   it('extrai só as opções do mundo', () => {
-    expect(worldOptionsFrom({ ...DEFAULT_PREFS, daylight: 'day' })).toEqual({ showNames: true, bubbles: 'important', liveliness: 'normal', dayNight: false, daylight: 'day', theme: 'auto', economy: false, legalOffice: true });
+    expect(worldOptionsFrom({ ...DEFAULT_PREFS, daylight: 'day' })).toEqual({ showNames: true, bubbles: 'important', liveliness: 'normal', dayNight: false, daylight: 'day', theme: 'auto', economy: false, ambientLife: true, legalOffice: true });
     expect(worldOptionsFrom({ ...DEFAULT_PREFS, daylight: 'night' })).toMatchObject({ dayNight: true, daylight: 'night' });
   });
   it('ciclo dia/noite: valida o modo e migra o interruptor antigo', () => {
@@ -94,6 +94,22 @@ describe('preferências', () => {
     expect(p.sounds).toEqual({ volume: 1, alerts: true, keys: false, elevator: true, social: true });
     expect(sanitizePrefs({ sounds: { volume: -1 } }).sounds.volume).toBe(0);
     expect(sanitizePrefs({ sounds: 'alto' }).sounds).toEqual(DEFAULT_PREFS.sounds);
+  });
+});
+
+describe('presença ambiente do escritório', () => {
+  it('ativa a presença em preferências antigas e rejeita valores inválidos', () => {
+    expect(sanitizePrefs({ showNames: false }).ambientLife).toBe(true);
+    expect(sanitizePrefs({ ambientLife: 'sim' }).ambientLife).toBe(true);
+    expect(sanitizePrefs({ ambientLife: false }).ambientLife).toBe(false);
+  });
+
+  it('persiste a escolha e a repassa para o cenário', () => {
+    const storage = memoryStorage();
+    savePrefs(storage, { ...DEFAULT_PREFS, ambientLife: false });
+    const prefs = loadPrefs(storage);
+    expect(prefs.ambientLife).toBe(false);
+    expect(worldOptionsFrom(prefs).ambientLife).toBe(false);
   });
 });
 

@@ -42,8 +42,10 @@ import type { CodexLive } from './live';
 import {
   createCodexState,
   describeCodexTool,
+  endCodexTurn,
   isThreadId,
   parseRolloutLine,
+  startCodexCall,
   type CodexLineResult,
   type CodexState,
   type RolloutMeta,
@@ -71,6 +73,8 @@ const LEGACY_WORKING_MS = 90_000;
 const PREFIX_HISTORY = 120;
 /** Resultados guardados ao ler um rollout antes de o agente entrar no escritório. */
 const BACKLOG_MAX = 400;
+/** Guarda retiradas mesmo quando o tracker é removido e o mesmo lock reaparece. */
+const RETIRED_SUB_MAX = 4096;
 /** Conta sem sessão aberta ao subir: quantos rollouts recentes tentar até achar um com o uso do plano. */
 const SEED_USAGE_FILES = 8;
 const MAIN_ROLE = tr('Agente principal (Codex)');
@@ -178,6 +182,8 @@ export class CodexSource implements AgentSource, CodexLive {
   private entries: readonly AccountEntry[] = [];
   private detected: DetectedAccount[] = [];
   private threads = new Map<string, ThreadTracker>();
+  private retiredSubs = new Map<string, number>();
+  private endedThreads = new Map<string, number>();
   private dirWatchers = new Map<string, FSWatcher>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private kick: ReturnType<typeof setTimeout> | null = null;
@@ -253,6 +259,8 @@ export class CodexSource implements AgentSource, CodexLive {
     for (const w of this.dirWatchers.values()) w.close();
     this.dirWatchers.clear();
     for (const t of this.threads.values()) this.unwatch(t);
+    this.retiredSubs.clear();
+    this.endedThreads.clear();
   }
 
   sources(): SourceInfo[] {
@@ -378,13 +386,17 @@ export class CodexSource implements AgentSource, CodexLive {
       status: 'idle',
       statusAt: 0,
       subDone: false,
+      endedAt: this.endedThreads.get(`${acc.id}:${threadId}`),
     };
   }
 
   /** Um ciclo de um thread presente: acha/lê o rollout e decide se ele está (ou continua) no escritório. */
   private syncThread(t: ThreadTracker, via: 'lock' | 'recent' | 'hook', now: number, boot: boolean): void {
     delete t.missingSince;
-    if (t.inOffice && !this.opts.office.has(t.key)) t.inOffice = false; // saiu do escritório (graça encerrada)
+    if (t.inOffice && !this.opts.office.has(t.key)) {
+      if (t.kind === 'sub') this.retireSub(t);
+      t.inOffice = false;
+    }
     this.pump(t, boot);
     this.reconcile(t, now, via);
     if (t.inOffice && t.kind === 'main') {
@@ -406,12 +418,10 @@ export class CodexSource implements AgentSource, CodexLive {
   private wanted(t: ThreadTracker, now: number, via?: 'lock' | 'recent' | 'hook'): boolean {
     if (t.kind === 'internal') return false;
     const hookRecent = t.lastHookAt !== undefined && now - t.lastHookAt < HOOK_PRESENCE_MS;
-    // SessionEnd: fecha, a não ser que algo novo tenha acontecido depois.
+    // SessionEnd só é desfeito por início explícito ou trabalho novo, nunca por lock/mtime.
     if (t.endedAt !== undefined) {
       const lock = t.acc.locks?.get(t.threadId);
-      const newer = (t.lastHookAt ?? 0) > t.endedAt || (t.lastWriteAt ?? 0) > t.endedAt + 1_000 || (lock?.createdAt ?? 0) > t.endedAt;
-      if (newer) delete t.endedAt;
-      else if (!lock || now - t.endedAt >= SESSION_END_GRACE_MS) return false;
+      if (!lock || now - t.endedAt >= SESSION_END_GRACE_MS) return false;
     }
     if (!hookRecent && via === 'lock') {
       const lock = t.acc.locks?.get(t.threadId);
@@ -424,6 +434,7 @@ export class CodexSource implements AgentSource, CodexLive {
     // hook dizer o cwd. Isso também segura um lock de subagente até o rollout dele dizer de quem ele é.
     if (t.kind === 'main' && !this.cwdOf(t)) return false;
     if (t.kind === 'sub') {
+      if (this.retiredSubs.has(t.key)) return false;
       const parent = this.parentKey(t);
       if (!parent || !this.opts.office.has(parent) || this.opts.office.isSubDone(parent) || this.opts.office.get(parent)?.status === 'offline') return false;
       // Subagente só aparece trabalhando (ou recém-criado pelo hook); depois de entregar, sai.
@@ -436,6 +447,30 @@ export class CodexSource implements AgentSource, CodexLive {
     if (!t.parentThreadId) return undefined;
     const direct = `${t.acc.id}:${t.parentThreadId}`;
     return direct;
+  }
+
+  /** Leituras, locks e status antigos não substituem um novo início de trabalho. */
+  private retireSub(t: ThreadTracker): void {
+    // Horário dos eventos da fonte: o aviso de entrega gerado pelo Office usa o horário
+    // da leitura, que pode ser posterior ao início real do próximo turno no mesmo lote.
+    const watermark = Math.max(t.statusAt, t.state.lastAt ?? 0);
+    this.retiredSubs.set(t.key, Math.max(this.retiredSubs.get(t.key) ?? 0, watermark));
+    if (this.retiredSubs.size > RETIRED_SUB_MAX) this.retiredSubs.delete(this.retiredSubs.keys().next().value!);
+    t.subDone = true;
+    delete t.hookSpawned;
+  }
+
+  private resumeSub(t: ThreadTracker, at: number, live = false): void {
+    const retiredAt = this.retiredSubs.get(t.key);
+    if (t.kind === 'sub' && retiredAt !== undefined && (at > retiredAt || (live && at === retiredAt))) this.retiredSubs.delete(t.key);
+  }
+
+  private resumeThread(t: ThreadTracker, at: number, live = false): void {
+    if (t.endedAt !== undefined && (at > t.endedAt || (live && at === t.endedAt))) {
+      delete t.endedAt;
+      this.endedThreads.delete(t.key);
+    }
+    this.resumeSub(t, at, live);
   }
 
   /** Projeto conhecido do thread (session_meta ou hook). */
@@ -492,7 +527,7 @@ export class CodexSource implements AgentSource, CodexLive {
     const office = this.opts.office;
     if (t.kind === 'sub') {
       if (!t.subDone) office.completeSub(t.key);
-      t.subDone = true;
+      this.retireSub(t);
     } else office.closeMain(t.key);
     t.inOffice = false;
   }
@@ -509,9 +544,10 @@ export class CodexSource implements AgentSource, CodexLive {
     if (t.kind !== 'sub') return;
     if (t.status === 'idle') {
       if (!t.subDone) office.completeSub(t.key);
-      t.subDone = true;
+      if (!t.subDone) this.retireSub(t);
       return;
     }
+    if (this.retiredSubs.has(t.key)) return;
     if (t.subDone) {
       office.reactivateSub(t.key);
       t.subDone = office.isSubDone(t.key);
@@ -573,7 +609,9 @@ export class CodexSource implements AgentSource, CodexLive {
     const start = tail.seekTail(this.tailBytes);
     t.tail = tail;
     t.rolloutPath = path;
+    const turnEndedAt = t.state.turnEndedAt;
     t.state = createCodexState(head.meta);
+    t.state.turnEndedAt = turnEndedAt;
     if (head.title) t.state.title = head.title;
     t.backlog = [];
     for (let i = 0; i < 64; i++) {
@@ -630,7 +668,7 @@ export class CodexSource implements AgentSource, CodexLive {
     let status: AgentStatus;
     if (s.turnOpen !== undefined) status = s.turnOpen ? 'working' : 'idle';
     else status = s.lastAt !== undefined && this.now() - s.lastAt < LEGACY_WORKING_MS ? 'working' : 'idle';
-    if (status === 'working' && this.now() - Math.max(t.lastWriteAt ?? 0, at) > WORKING_QUIET_MS) status = 'idle';
+    if (status === 'working' && !s.pending.size && this.now() - Math.max(t.lastWriteAt ?? 0, at) > WORKING_QUIET_MS) status = 'idle';
     return status;
   }
 
@@ -645,12 +683,14 @@ export class CodexSource implements AgentSource, CodexLive {
           this.pushUsage(t.acc, sig.usage, sig.plan);
           break;
         case 'turnStart':
+          this.resumeThread(t, r.at);
           if (r.at >= t.statusAt) delete t.approvalWaiting;
           this.decide(t, 'working', r.at, undefined, live);
           break;
         case 'turnEnd':
           if (r.at >= t.statusAt) delete t.approvalWaiting;
           this.decide(t, 'idle', r.at, undefined, live);
+          if (t.kind === 'sub' && t.status === 'idle' && t.statusAt === r.at) this.retireSub(t);
           break;
         case 'progress':
           if (r.at >= t.statusAt) delete t.approvalWaiting;
@@ -710,8 +750,8 @@ export class CodexSource implements AgentSource, CodexLive {
 
   /** 'working' sem nenhuma notícia por muito tempo (turno morto num crash): vira 'idle'. */
   private quietCheck(t: ThreadTracker, now: number): void {
-    if (t.status !== 'working') return;
-    const last = Math.max(t.lastWriteAt ?? 0, t.lastHookAt ?? 0, t.statusAt);
+    if (t.status !== 'working' || t.state.pending.size) return;
+    const last = Math.max(t.lastWriteAt ?? 0, t.lastHookAt ?? 0, t.statusAt, t.state.lastAt ?? 0);
     if (now - last > WORKING_QUIET_MS) this.decide(t, 'idle', now, undefined, true);
   }
 
@@ -848,6 +888,11 @@ export class CodexSource implements AgentSource, CodexLive {
       const t = this.threads.get(`${acc.id}:${root}`);
       if (!t) return false;
       t.endedAt = now;
+      // A próxima execução não pode herdar chamadas ou aprovações abandonadas pela sessão encerrada.
+      endCodexTurn(t.state, now);
+      delete t.approvalWaiting;
+      this.endedThreads.set(t.key, now);
+      if (this.endedThreads.size > RETIRED_SUB_MAX) this.endedThreads.delete(this.endedThreads.keys().next().value!);
       delete t.lastHookAt;
       this.reconcile(t, now);
       this.schedule();
@@ -864,7 +909,15 @@ export class CodexSource implements AgentSource, CodexLive {
     this.reconcile(rootT, now, 'hook');
 
     switch (event) {
+      case 'SessionStart':
+        if (t.endedAt !== undefined && now >= t.endedAt) {
+          this.resumeThread(t, now, true);
+          t.state.turnOpen = false;
+          this.decide(t, 'idle', now, undefined, true);
+        }
+        break;
       case 'SubagentStart':
+        this.resumeThread(t, now, true);
         t.hookSpawned = true;
         t.state.turnOpen = true;
         delete t.approvalWaiting;
@@ -872,20 +925,24 @@ export class CodexSource implements AgentSource, CodexLive {
         break;
       case 'SubagentStop':
         delete t.approvalWaiting;
-        t.state.turnOpen = false;
-        t.state.questions.endTurn(now);
+        endCodexTurn(t.state, now);
         this.decide(t, 'idle', now, undefined, true);
+        if (t.status === 'idle') this.retireSub(t);
         break;
-      case 'PostToolUse':
-        t.state.questions.complete(str(input.tool_use_id), input.tool_response);
+      case 'PostToolUse': {
+        const id = str(input.tool_use_id);
+        if (id) t.state.pending.delete(id);
+        t.state.questions.complete(id, input.tool_response);
         delete t.approvalWaiting;
-        // Uma conclusão atrasada não inicia outro turno do subagente que já saiu.
-        this.decide(t, t.subDone && !t.state.turnOpen ? 'idle' : 'working', now, undefined, true);
+        // Uma conclusão atrasada não inicia outro turno depois de um término explícito.
+        this.decide(t, t.state.turnOpen === false ? 'idle' : 'working', now, undefined, true);
         break;
+      }
       case 'UserPromptSubmit': {
         const prompt = str(input.prompt) ?? '';
         t.state.questions.reply(prompt);
         if (!prompt.trimStart().startsWith('<send_user_message_question_reply>')) {
+          this.resumeThread(t, now, true);
           t.state.turnOpen = true;
           delete t.approvalWaiting;
         }
@@ -895,37 +952,40 @@ export class CodexSource implements AgentSource, CodexLive {
       case 'PreCompact':
       case 'PostCompact':
         delete t.approvalWaiting;
-        this.decide(t, t.subDone && !t.state.turnOpen ? 'idle' : 'working', now, undefined, true);
+        this.decide(t, t.state.turnOpen === false ? 'idle' : 'working', now, undefined, true);
         break;
       case 'PreToolUse': {
+        this.resumeThread(t, now, true);
         t.state.turnOpen = true;
         delete t.approvalWaiting;
         this.decide(t, 'working', now, undefined, true);
-        if (t !== rootT) this.reconcile(t, now, 'hook');
+        this.reconcile(t, now, 'hook');
         const toolName = str(input.tool_name) ?? 'ferramenta';
         const toolInput = rec(input.tool_input) ?? {};
         const { desc, tool } = describeCodexTool(toolName, toolInput);
         const id = str(input.tool_use_id);
+        startCodexCall(t.state, id, toolName, now, true);
         if (t.state.questions.start(id, toolName, toolInput, now, t.key)) this.decide(t, 'waiting', now, undefined, true);
         const act: Activity = { id: `${t.key}#${id ?? `hook${now.toString(36)}`}`, at: now, ...desc, tool };
         if (t.inOffice) office.addActivity(t.key, act, true);
         break;
       }
       case 'PermissionRequest':
+        this.resumeThread(t, now, true);
         t.approvalWaiting = true;
         this.decide(t, 'waiting', now, tr('aprovar um comando'), true);
         break;
       case 'Stop':
       case 'Interrupt':
         delete t.approvalWaiting;
-        t.state.turnOpen = false;
-        t.state.questions.endTurn(now);
+        endCodexTurn(t.state, now);
         this.decide(t, 'idle', now, undefined, true);
+        if (t.kind === 'sub' && t.status === 'idle') this.retireSub(t);
         break;
       default:
         break;
     }
-    if (t !== rootT) this.reconcile(t, now, 'hook');
+    this.reconcile(t, now, 'hook');
     return true;
   }
 
@@ -939,14 +999,16 @@ export class CodexSource implements AgentSource, CodexLive {
     }
     t.lastHookAt = now;
     delete t.missingSince;
-    if (t.endedAt !== undefined && now > t.endedAt) delete t.endedAt;
     if (cwd) t.hookCwd ??= cwd;
     if (parent && !t.meta && t.kind === 'main') {
       t.kind = 'sub';
       t.parentThreadId = parent;
     }
     if (agentType) t.hookRole ??= agentType;
-    if (t.inOffice && !this.opts.office.has(t.key)) t.inOffice = false;
+    if (t.inOffice && !this.opts.office.has(t.key)) {
+      if (t.kind === 'sub') this.retireSub(t);
+      t.inOffice = false;
+    }
     this.pump(t, false);
     return t;
   }

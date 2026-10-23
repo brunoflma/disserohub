@@ -403,6 +403,8 @@ export class Office {
     const rec = this.agents.get(id);
     if (!rec) return;
     const info = rec.info;
+    // Um comando em primeiro plano ainda pertence ao turno; o registro pode dizer "idle" durante a execução.
+    if (status === 'idle' && info.shells?.some((job) => !job.background)) status = 'working';
     const prev = info.status;
     const reason = status === 'waiting' ? (waitingFor ?? tr('responder no terminal')) : undefined;
     if (prev === status && info.waitingFor === reason) return;
@@ -991,7 +993,7 @@ export class Office {
     for (const rec of this.agents.values()) {
       const info = rec.info;
       const resting = info.kind === 'main' && info.status === 'idle' && rec.removeAt === undefined
-        && !perms?.has(info.id) && !presentParents.has(info.id);
+        && !perms?.has(info.id) && !presentParents.has(info.id) && !info.shells?.length;
       // Quando o último subagente/pedido termina, começa um prazo inteiro para o principal descansar.
       if (resting) rec.idleSince ??= now;
       else delete rec.idleSince;

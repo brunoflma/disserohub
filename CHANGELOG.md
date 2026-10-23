@@ -10,6 +10,24 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+## [1.0.3.3] - 2026-10-23
+
+### Adicionado
+
+- Vida no escritório: uma recepcionista e três pessoas circulam pelas áreas comuns de segunda a sexta, das 8h às 18h no horário do aparelho. A opção pode ser desligada nas configurações e respeita redução de movimento. Essa população é independente das sessões, não faz chamadas de IA e não altera contadores, feed ou histórico dos agentes.
+
+### Corrigido
+
+- Subagentes concluídos não reaparecem apenas porque um lock antigo foi reencontrado, o histórico foi relido ou chegaram resultados e eventos de compactação atrasados. Uma tarefa nova continua permitindo retomada imediata.
+- Sessões e tarefas encerradas, paradas ou interrompidas não voltam ao estado de trabalho por eventos atrasados. Chamadas, perguntas e aprovações abandonadas não contaminam a próxima execução.
+- Comandos ainda em execução impedem a retirada por silêncio ou ociosidade. Os hooks acompanham cada chamada por ID, e concluir uma preserva outras chamadas pendentes.
+- Trabalho novo pode interromper a caminhada de saída antes da entrada no elevador. A recuperação após ausência temporária do snapshot e a troca de sessão preservam o personagem quando a saída ainda é reversível.
+- Snapshots antigos sucessivos não cancelam uma saída válida, e subagentes antigos não entram quando o snapshot atual informa que o principal terminou. Saída forçada e salas ocultas continuam sendo respeitadas.
+
+### Compatibilidade
+
+- Mantidos a base técnica Habblaud 0.11.0 com as integrações já publicadas, o prazo normal de descanso dos principais e o canal de atualização exclusivo do DisseroHub. O plugin hospedado do Dissero mantém sua distribuição independente.
+
 ## [1.0.3.2] - 2026-10-17
 
 ### Adicionado

@@ -199,6 +199,139 @@ describe('simulação do escritório', () => {
     expect(sim.rooms.get('/a')!.lightOn).toBe(true);
   });
 
+  it('trabalho novo interrompe a saída enquanto ainda está a caminho do elevador', () => {
+    const sim = newSim();
+    const clock = { now: T0 };
+    const rooms = [room('/a', 0)];
+    const original = agent('ana', '/a', 'working');
+    sim.applySnapshot(snap(rooms, [original]), clock.now);
+    run(sim, clock, 0.5);
+    const ana = sim.chars.get('ana')!;
+
+    const offlineAt = clock.now + 1_000;
+    sim.applySnapshot(snap(rooms, [agent('ana', '/a', 'offline', { statusSince: offlineAt, lastEventAt: offlineAt })], 2), clock.now);
+    run(sim, clock, 10, () => ana.leaving && ana.step?.t === 'go');
+    expect(ana.leaving).toBe(true);
+    expect(ana.inside).toBe(false);
+
+    const staleAt = offlineAt - 10;
+    const staleWork = agent('ana', '/a', 'working', { statusSince: staleAt, lastEventAt: staleAt });
+    sim.applySnapshot(snap(rooms, [staleWork], 3), clock.now);
+    expect(ana.leaving).toBe(true);
+
+    const staleActivityAt = offlineAt - 9;
+    const staleActivity = agent('ana', '/a', 'working', {
+      statusSince: staleActivityAt,
+      lastEventAt: staleActivityAt,
+      activity: { id: 'old-next', kind: 'edit', icon: '✏️', text: 'Editando', at: staleActivityAt },
+    });
+    sim.applySnapshot(snap(rooms, [staleActivity], 4), clock.now);
+    expect(ana.leaving).toBe(true);
+
+    const resumedAt = offlineAt + 1;
+    sim.applySnapshot(snap(rooms, [agent('ana', '/a', 'working', { statusSince: resumedAt, lastEventAt: resumedAt })], 5), clock.now);
+    expect(sim.chars.get('ana')).toBe(ana);
+    expect(ana.leaving).toBe(false);
+    run(sim, clock, 30, () => ana.mode === 'work' && ana.atSpot === ana.homeSpot && ana.pose === 'type');
+    expect(ana.mode).toBe('work');
+    expect(ana.atSpot).toBe(ana.homeSpot);
+    expect(ana.pose).toBe('type');
+  });
+
+  it('retorno do snapshot recupera a mesma sessão antes de entrar no elevador', () => {
+    const sim = newSim();
+    const clock = { now: T0 };
+    const rooms = [room('/a', 0)];
+    const original = agent('ana', '/a', 'working');
+    sim.applySnapshot(snap(rooms, [original]), clock.now);
+    run(sim, clock, 0.5);
+    const ana = sim.chars.get('ana')!;
+
+    sim.applySnapshot(snap(rooms, [], 2), clock.now);
+    run(sim, clock, 10, () => ana.leaving && ana.step?.t === 'go');
+    expect(ana.leaving).toBe(true);
+
+    sim.applySnapshot(snap(rooms, [original], 3), clock.now);
+    expect(sim.chars.get('ana')).toBe(ana);
+    expect(ana.leaving).toBe(false);
+    run(sim, clock, 30, () => ana.mode === 'work' && ana.atSpot === ana.homeSpot && ana.pose === 'type');
+    expect(ana.atSpot).toBe(ana.homeSpot);
+    expect(ana.pose).toBe('type');
+  });
+
+  it('uma sessão nova pode retomar a mesma personagem mesmo com relógios reiniciados', () => {
+    const sim = newSim();
+    const clock = { now: T0 };
+    const rooms = [room('/a', 0)];
+    const original = agent('ana', '/a', 'working');
+    sim.applySnapshot(snap(rooms, [original]), clock.now);
+    run(sim, clock, 0.5);
+    const ana = sim.chars.get('ana')!;
+
+    const offlineAt = clock.now + 1_000;
+    sim.applySnapshot(snap(rooms, [agent('ana', '/a', 'offline', { statusSince: offlineAt, lastEventAt: offlineAt })], 2), clock.now);
+    run(sim, clock, 10, () => ana.leaving && ana.step?.t === 'go');
+    const nextSession = agent('ana', '/a', 'working', { sessionId: 's-ana-next', startedAt: T0 - 100, statusSince: T0 - 100, lastEventAt: T0 - 100 });
+
+    sim.applySnapshot(snap(rooms, [nextSession], 3), clock.now);
+    expect(sim.chars.get('ana')).toBe(ana);
+    expect(ana.leaving).toBe(false);
+    run(sim, clock, 30, () => ana.mode === 'work' && ana.atSpot === ana.homeSpot && ana.pose === 'type');
+    expect(ana.atSpot).toBe(ana.homeSpot);
+    expect(ana.pose).toBe('type');
+  });
+
+  it.each(['forcedOffline', 'hiddenRooms'] as const)('não retoma enquanto %s ainda está ativo', (guard) => {
+    const sim = newSim();
+    const clock = { now: T0 };
+    const rooms = [room('/a', 0)];
+    sim.applySnapshot(snap(rooms, [agent('ana', '/a', 'working')]), clock.now);
+    run(sim, clock, 0.5);
+    const ana = sim.chars.get('ana')!;
+    const offlineAt = clock.now + 1_000;
+    sim.applySnapshot(snap(rooms, [agent('ana', '/a', 'offline', { statusSince: offlineAt, lastEventAt: offlineAt })], 2), clock.now);
+    run(sim, clock, 10, () => ana.leaving && ana.step?.t === 'go');
+
+    if (guard === 'forcedOffline') sim.forcedOffline.add('ana');
+    else sim.hiddenRooms.add('/a');
+    const resumedAt = offlineAt + 1;
+    sim.applySnapshot(snap(rooms, [agent('ana', '/a', 'working', { statusSince: resumedAt, lastEventAt: resumedAt })], 3), clock.now);
+    expect(sim.chars.get('ana')).toBe(ana);
+    expect(ana.leaving).toBe(true);
+  });
+
+  it('sub órfão que saiu com o pai não reaparece com snapshot antigo; nova sessão entra', () => {
+    const sim = newSim();
+    const clock = { now: T0 };
+    const rooms = [room('/a', 0)];
+    const main = agent('ana', '/a', 'working');
+    const sub = agent('ana:s1', '/a', 'working', { kind: 'sub', parentId: 'ana' });
+    sim.applySnapshot(snap(rooms, [main, sub]), clock.now);
+    run(sim, clock, 0.5);
+
+    const endedAt = T0 + 1_000;
+    const offlineMain = { ...main, status: 'offline' as const, statusSince: endedAt, lastEventAt: endedAt };
+    sim.applySnapshot(snap(rooms, [offlineMain, sub], 2), clock.now);
+    const ana = sim.chars.get('ana')!;
+    const beto = sim.chars.get('ana:s1')!;
+    run(sim, clock, 3, () => ana.leaving && beto.leaving);
+    expect(ana.leaving).toBe(true);
+    expect(beto.leaving).toBe(true);
+    run(sim, clock, 120, () => !sim.chars.has('ana') && !sim.chars.has('ana:s1'));
+    expect(sim.chars.has('ana')).toBe(false);
+    expect(sim.chars.has('ana:s1')).toBe(false);
+
+    sim.applySnapshot(snap(rooms, [offlineMain, sub], 3), clock.now);
+    expect(sim.chars.has('ana:s1')).toBe(false);
+
+    const resumedAt = endedAt + 1;
+    const nextMain = { ...main, sessionId: 's-ana-next', startedAt: resumedAt, statusSince: resumedAt, lastEventAt: resumedAt };
+    const nextSub = { ...sub, sessionId: 's-ana:s2', startedAt: resumedAt, statusSince: resumedAt, lastEventAt: resumedAt };
+    sim.applySnapshot(snap(rooms, [nextMain, nextSub], 4), clock.now);
+    expect(sim.chars.get('ana')).toBeDefined();
+    expect(sim.chars.get('ana:s1')).toBeDefined();
+  });
+
   it('subagente entrega o resultado ao pai e vai embora', () => {
     const sim = newSim();
     const clock = { now: T0 };
@@ -852,5 +985,46 @@ describe('espera de shell', () => {
     expect(ana.mode).toBe('shell');
     expect(ana.shellCount).toBe(1);
     expect(ana.pose).toBe('wait');
+  });
+});
+
+describe('convivência entre sessões reais e pessoas do cenário', () => {
+  it('mantém uma sessão na própria mesa, sem incluir moradores nos contadores ou no quadro', () => {
+    const now = new Date(2026, 9, 23, 10).getTime();
+    const options = { ...DEFAULT_WORLD_OPTIONS, ambientLife: true, reducedMotion: false };
+    const sim = new Sim(art, () => options, null);
+    const rooms = [room('/projeto', 0)];
+    const ana = agent('ana', '/projeto', 'working', { statusSince: now });
+    sim.applySnapshot(snap(rooms, [ana]), now);
+    const clock = { now };
+    run(sim, clock, 90);
+
+    expect(sim.ambient.chars.size).toBe(4);
+    expect([...sim.chars.keys()]).toEqual(['ana']);
+    const real = sim.chars.get('ana')!;
+    expect(real.atSpot).toBe(real.homeSpot);
+    expect(sim.spots.ownerOf(real.homeSpot!)).toBe(real.id);
+    expect(sim.occupants(sim.rooms.get('/projeto')!)).toBe(1);
+    expect(sim.rooms.get('/projeto')!.accounts).toEqual(['.claude']);
+    expect(sim.rooms.get('/projeto')!.board).toEqual([]);
+    expect(sim.social.events).toEqual([]);
+
+    // Fechar o expediente retira somente as pessoas do cenário.
+    const close = new Date(2026, 9, 23, 18).getTime();
+    sim.update(1 / 30, close);
+    expect(sim.ambient.chars.size).toBe(0);
+    expect(sim.chars.get('ana')).toBe(real);
+    expect(sim.spots.ownerOf(real.homeSpot!)).toBe(real.id);
+  });
+
+  it('redução de movimento congela a presença ambiente enquanto a sessão continua', () => {
+    const now = new Date(2026, 9, 23, 10).getTime();
+    const sim = new Sim(art, () => ({ ...DEFAULT_WORLD_OPTIONS, ambientLife: true, reducedMotion: true }), null);
+    sim.applySnapshot(snap([room('/projeto', 0)], [agent('ana', '/projeto', 'working')]), now);
+    const before = [...sim.ambient.chars.values()].map((ch) => [ch.id, ch.x, ch.y, ch.pose]);
+    run(sim, { now }, 60);
+    expect([...sim.ambient.chars.values()].map((ch) => [ch.id, ch.x, ch.y, ch.pose])).toEqual(before);
+    expect([...sim.ambient.chars.values()].every((ch) => ch.animT === 0 && !ch.step)).toBe(true);
+    expect(sim.chars.get('ana')!.pose).toBe('type');
   });
 });

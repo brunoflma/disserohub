@@ -30,6 +30,7 @@ import {
   type Mode,
 } from './behavior';
 import { Character, dirOf, facing } from './character';
+import { AmbientOffice } from './ambient';
 import { Elevator } from './elevator';
 import { RoomFxState } from './github';
 import { RoomState } from './room-state';
@@ -73,6 +74,20 @@ const PHONE_SEATS: SpotKind[] = ['beanbag', 'sofa', 'armchair', 'cafe_seat', 'be
 const REST_SEATS: SpotKind[] = ['armchair', 'sofa', 'beanbag', 'nook', 'cafe_seat', 'bench'];
 const NAP_SEATS: SpotKind[] = ['armchair', 'sofa', 'beanbag', 'nook'];
 const ENTER_MS = 180;
+const ACTIVE_STATUSES = new Set<AgentInfo['status']>(['working', 'waiting', 'shell']);
+
+interface LeaveBaseline {
+  readonly sessionId: string;
+  readonly at: number;
+  readonly activityId: string | null;
+  readonly missing: boolean;
+}
+
+function latestAgentAt(a: AgentInfo): number {
+  let at = Math.max(a.startedAt, a.statusSince, a.lastEventAt, a.activity?.at ?? 0);
+  for (const event of a.recent) if (event.at > at) at = event.at;
+  return at;
+}
 
 function between(rng: () => number, a: number, b: number): number {
   return a + rng() * (b - a);
@@ -83,6 +98,8 @@ const lookSig = (a: AgentInfo): string => `${a.seed}|${a.look}|${partsKey(a.part
 
 export class Sim {
   readonly chars = new Map<string, Character>();
+  /** Pessoas do cenário: nunca entram no inventário das sessões ou na vida social dos agentes. */
+  readonly ambient: AmbientOffice;
   readonly rooms = new Map<string, RoomState>();
   readonly spots = new SpotRegistry();
   readonly elevators: Elevator[] = [];
@@ -112,6 +129,10 @@ export class Sim {
   /** Festa e alarme das salas (eventos do GitHub; sim/github.ts). */
   readonly roomFx = new RoomFxState();
   private lastSnapshot: OfficeSnapshot | null = null;
+  /** Identidades do snapshot corrente para subagentes cujo pai terminou. */
+  private agentsInSnapshot = new Map<string, AgentInfo>();
+  /** Evidência imutável do início da saída, só enquanto a Character existe. */
+  private readonly leaveBaselines = new WeakMap<Character, LeaveBaseline>();
   /** Desde quando há uma vaga livre antes da última sala (0 = não há). */
   private gapSince = 0;
   private moveSeq = 0;
@@ -129,6 +150,7 @@ export class Sim {
     this.finder = new PathFinder(this.building.grid);
     this.spots.setSpots(this.building.spots);
     for (const s of this.spots.ofKind('elevator')) this.elevators.push(new Elevator(this.elevators.length, s.id));
+    this.ambient = new AmbientOffice(art, this, options);
   }
 
   // =================================================================== snapshot
@@ -144,6 +166,7 @@ export class Sim {
     const first = !this.initialized;
     this.initialized = true;
     this.accounts = new Map(snap.accounts.map((a) => [a.id, { short: a.short, color: a.color, name: a.name, ...(a.provider === 'codex' ? { provider: a.provider } : {}) }]));
+    this.agentsInSnapshot = new Map(snap.agents.map((a) => [a.id, a]));
 
     // ---- salas
     let layoutDirty = false;
@@ -191,7 +214,10 @@ export class Sim {
       if (a.status === 'done') continue;
       if (a.kind === 'sub' && a.parentId) {
         const parent = this.chars.get(a.parentId);
-        if (parent && (parent.leaving || parent.gone)) continue;
+        const parentInfo = this.agentsInSnapshot.get(a.parentId);
+        const parentSnapshotFresh = !!parentInfo && ACTIVE_STATUSES.has(parentInfo.status) && (!parent || parentInfo.sessionId !== parent.info.sessionId || latestAgentAt(parentInfo) > latestAgentAt(parent.info));
+        if (parent?.gone || (parent && (parent.leaving || parent.mode === 'leave') && !parentSnapshotFresh)) continue;
+        if (!parent && parentInfo && (parentInfo.status === 'offline' || parentInfo.status === 'done' || this.forcedOffline.has(parentInfo.id) || this.hiddenRooms.has(parentInfo.roomId))) continue;
       }
       const nc = this.spawn(a, first, now);
       if (nc) {
@@ -214,6 +240,7 @@ export class Sim {
       for (const ch of order) this.placeInitial(ch, now);
     }
     this.refreshRoomInfo();
+    this.ambient.sync(now);
   }
 
   /** Reaplica o último snapshot (depuração). */
@@ -246,9 +273,19 @@ export class Sim {
   }
 
   private updateAgent(ch: Character, a: AgentInfo, now: number): void {
-    const prevStatus = ch.info.status;
+    const previous = ch.info;
+    const prevStatus = previous.status;
     const hadShells = !!ch.info.shells?.length;
-    const prevLook = lookSig(ch.info);
+    const prevLook = lookSig(previous);
+    const sessionChanged = a.sessionId !== previous.sessionId;
+    const wasMissing = ch.missingSince !== null;
+    const resume = this.canResumeLeaving(ch, a, wasMissing);
+    if (sessionChanged) {
+      ch.lastActivityId = a.activity?.id ?? null;
+      ch.activityChangedAt = 0;
+      ch.shellDoneAt = latestShellDone(a)?.at ?? 0;
+      ch.delivered = false;
+    }
     ch.info = a;
     if (lookSig(a) !== prevLook) {
       try {
@@ -258,6 +295,13 @@ export class Sim {
       }
     }
     ch.missingSince = null;
+    if (resume) {
+      this.leaveBaselines.delete(ch);
+      ch.leaving = false;
+      ch.alpha = 1;
+      ch.arriving = false;
+      ch.reactUntil = 0;
+    }
     if (a.roomId !== ch.roomId && !ch.leaving) {
       if (ch.homeSpot) this.spots.release(ch.homeSpot, ch.id);
       ch.homeSpot = null;
@@ -284,8 +328,27 @@ export class Sim {
       this.reactShellDone(ch, !sd.error, now);
     }
     // shells mudam sem mudar o status (ex.: comando em primeiro plano começou/terminou)
-    if (prevStatus !== a.status || hadShells || !!a.shells?.length || ch.mode === 'shell' || this.forcedOffline.has(ch.id)) this.refreshMode(ch);
+    if (resume || prevStatus !== a.status || hadShells || !!a.shells?.length || ch.mode === 'shell' || this.forcedOffline.has(ch.id)) this.refreshMode(ch);
     this.refreshShell(ch, now);
+  }
+
+  private canResumeLeaving(ch: Character, next: AgentInfo, wasMissing: boolean): boolean {
+    if (!ch.leaving || ch.gone || ch.inside || ch.step?.t === 'elevIn' || ch.step?.t === 'remove') return false;
+    const baseline = this.leaveBaselines.get(ch);
+    if (!baseline || this.forcedOffline.has(ch.id) || this.hiddenRooms.has(ch.info.roomId) || this.hiddenRooms.has(next.roomId)) return false;
+    if (next.status === 'offline' || next.status === 'done') return false;
+    if (next.kind === 'sub' && next.parentId) {
+      const parent = this.chars.get(next.parentId);
+      const parentInfo = this.agentsInSnapshot.get(next.parentId);
+      if (parentInfo && (parentInfo.status === 'offline' || parentInfo.status === 'done' || this.forcedOffline.has(parentInfo.id) || this.hiddenRooms.has(parentInfo.roomId))) return false;
+      if (!parent && !parentInfo) return false;
+      const parentSnapshotFresh = !!parentInfo && ACTIVE_STATUSES.has(parentInfo.status) && (!parent || parentInfo.sessionId !== parent.info.sessionId || latestAgentAt(parentInfo) > latestAgentAt(parent.info));
+      if (parent && (parent.leaving || parent.gone || parent.mode === 'leave') && !parentSnapshotFresh) return false;
+    }
+    if (next.sessionId !== baseline.sessionId || (wasMissing && baseline.missing)) return true;
+    if (!ACTIVE_STATUSES.has(next.status)) return false;
+    const newActivity = !!next.activity && next.activity.id !== baseline.activityId && next.activity.at > baseline.at;
+    return latestAgentAt(next) > baseline.at || newActivity;
   }
 
   /** Recalcula o modo e interrompe o plano se mudou. */
@@ -313,10 +376,13 @@ export class Sim {
     const a = ch.info;
     if (ch.leaving) return 'leave';
     const parent = a.parentId ? this.chars.get(a.parentId) : undefined;
-    const parentGone = !!parent && (parent.leaving || parent.gone);
+    const parentInfo = a.parentId ? this.agentsInSnapshot.get(a.parentId) : undefined;
+    const parentTerminal = !!parentInfo && (parentInfo.status === 'offline' || parentInfo.status === 'done' || this.forcedOffline.has(parentInfo.id) || this.hiddenRooms.has(parentInfo.roomId));
+    const parentGone = a.kind === 'sub' && ((!!parent && (parent.leaving || parent.gone || parent.mode === 'leave')) || (!parent && parentTerminal));
     const missing = ch.missingSince !== null && this.now - ch.missingSince >= MISSING_DEBOUNCE_MS;
     const offline = this.forcedOffline.has(ch.id);
-    if (a.kind === 'sub' && a.status === 'done' && !ch.delivered && !offline && !parentGone) return 'deliver';
+    if (a.kind === 'sub' && parentGone) return 'leave';
+    if (a.kind === 'sub' && a.status === 'done' && !ch.delivered && !offline) return 'deliver';
     const m = modeFor(offline ? 'offline' : a.status, { kind: a.kind, missing, parentGone, shells: a.shells, now: this.now });
     if (m === 'deliver' && ch.delivered) return 'leave';
     return m;
@@ -494,6 +560,7 @@ export class Sim {
     this.layoutVersion++;
     this.finder.setGrid(building.grid);
     const lost = this.spots.setSpots(building.spots);
+    this.ambient.relayout();
     for (const { owner } of lost) {
       const ch = this.chars.get(owner);
       if (!ch) continue;
@@ -537,6 +604,11 @@ export class Sim {
     for (const ch of this.chars.values()) {
       if (ch.missingSince !== null && !ch.leaving && now - ch.missingSince >= MISSING_DEBOUNCE_MS) this.refreshMode(ch);
       this.runCharacter(ch, dt, now);
+    }
+    this.ambient.sync(now);
+    for (const ch of this.ambient.chars.values()) {
+      if (this.options().reducedMotion) ch.animT = 0;
+      else this.runCharacter(ch, dt, now);
     }
     for (const [id, ch] of this.chars) {
       if (ch.gone) {
@@ -759,7 +831,7 @@ export class Sim {
       const planned = this.think(ch, now);
       if (!planned) ch.thinkAt = now + 400;
     }
-    if (!ch.step && !ch.queue.length) this.restPose(ch, now);
+    if (!ch.step && !ch.queue.length && !this.ambient.chars.has(ch.id)) this.restPose(ch, now);
   }
 
   private runStep(ch: Character, s: Step, dt: number, now: number): boolean {
@@ -1130,6 +1202,7 @@ export class Sim {
   /** Decide o próximo plano. Retorna true se planejou algo. */
   private think(ch: Character, now: number): boolean {
     if (ch.gone) return false;
+    if (this.ambient.chars.has(ch.id)) return this.ambient.plan(ch, now);
     if (ch.mode === 'leave') return this.planLeave(ch, now);
     if (ch.mode === 'deliver') return this.planDeliver(ch, now);
     const room = this.rooms.get(ch.roomId);
@@ -1322,6 +1395,13 @@ export class Sim {
   }
 
   private planLeave(ch: Character, now: number): boolean {
+    if (!this.leaveBaselines.has(ch)) {
+      const parent = ch.info.parentId ? this.chars.get(ch.info.parentId) : undefined;
+      const parentInfo = ch.info.parentId ? this.agentsInSnapshot.get(ch.info.parentId) : undefined;
+      const parentLeaving = ch.info.kind === 'sub' && ((!!parent && (parent.leaving || parent.gone || parent.mode === 'leave')) || (!parent && !!parentInfo && (parentInfo.status === 'offline' || parentInfo.status === 'done' || this.forcedOffline.has(parentInfo.id) || this.hiddenRooms.has(parentInfo.roomId))));
+      const missing = ch.missingSince !== null && now - ch.missingSince >= MISSING_DEBOUNCE_MS && ch.info.status !== 'offline' && ch.info.status !== 'done' && !this.forcedOffline.has(ch.id) && !this.hiddenRooms.has(ch.info.roomId) && !parentLeaving;
+      this.leaveBaselines.set(ch, { sessionId: ch.info.sessionId, at: latestAgentAt(ch.info), activityId: ch.info.activity?.id ?? null, missing });
+    }
     ch.leaving = true;
     ch.arriving = false;
     this.spots.releaseAll(ch.id);
@@ -1764,6 +1844,7 @@ export class Sim {
       room.switchClaim = null;
     }
     this.stallBusy.clear();
+    this.ambient.fastForward(now);
   }
 
   private finishStep(ch: Character, s: Step, now: number): void {

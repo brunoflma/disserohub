@@ -47,7 +47,7 @@ export function layoutReception(): AreaLayout {
 
   b.furn('plant_tall', 1, 2, 'monstera', { order: 0.2 });
   b.furn('plant_tall', 14, 2, 'ficus', { order: 0.21 });
-  b.furn('reception_desk', 9, 5, undefined, { order: 0.4 });
+  const receptionDesk = b.furn('reception_desk', 9, 5, undefined, { order: 0.4 });
   b.furn('filing_cabinet', 8, 5, undefined, { order: 0.42 });
   // cantinho de espera com poltronas
   b.seat('armchair', 'armchair', 9, 8, 'right', 'right', { order: 0.6 });
@@ -70,6 +70,9 @@ export function layoutReception(): AreaLayout {
   b.walk(1, 2, 14, 10);
   b.spot('talk', 6, 9, 'right', { group: 'talk:recepcao', dx: -1 });
   b.spot('talk', 7, 9, 'left', { group: 'talk:recepcao', dx: 1 });
+
+  // Acrescentado ao fim para preservar os ids dos móveis e assentos existentes.
+  b.spot('reception_staff', 10, 4, 'down', { seated: true, furnitureId: receptionDesk, sortY: b.py(5) - 1 });
 
   const a = b.build();
   a.shade = undefined;

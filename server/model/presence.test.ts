@@ -106,6 +106,28 @@ describe('presença por atividade recente', () => {
     expect(c.snapshot().rooms).toHaveLength(1);
   });
 
+  it.each([
+    { description: 'em primeiro plano', background: false, status: 'working' as const },
+    { description: 'em segundo plano', background: true, status: 'idle' as const },
+  ])('mantém a sessão enquanto o shell $description está ativo e reinicia a folga quando termina', ({ background, status }) => {
+    const c = setup();
+    c.add('main', 'idle');
+    c.office.setShells('main', [{ id: 'build', label: 'Build', startedAt: c.now(), background, kind: 'shell' }]);
+    c.office.setStatus('main', 'idle'); // O registro pode dizer ocioso enquanto o shell ainda está ativo.
+    expect(c.snapshot().agents[0]?.status).toBe(status);
+
+    c.advance(3 * 60 * MIN);
+    expect(c.snapshot().agents[0]).toMatchObject({ status, shells: [{ id: 'build' }] });
+
+    c.office.setShells('main', []); // Publicação vazia = o watcher confirmou o término.
+    c.office.setStatus('main', 'idle');
+    expect(c.snapshot().agents).toHaveLength(1);
+    c.advance(IDLE_PRESENCE_MS - 1);
+    expect(c.snapshot().agents).toHaveLength(1);
+    c.advance(1);
+    expect(c.snapshot().agents).toEqual([]);
+  });
+
   it('pedido pendente torna o agente visível; ao terminar recebe 15 minutos de descanso', () => {
     const c = setup();
     c.add();

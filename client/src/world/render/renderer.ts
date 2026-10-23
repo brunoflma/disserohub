@@ -39,6 +39,7 @@ interface Ent {
   ref: FurnVis | Character | ExteriorProp | Car | null;
   area: AreaVis | null;
   scale: number;
+  ambient: boolean;
 }
 
 interface Car {
@@ -76,6 +77,8 @@ export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
   readonly areas = new Map<string, AreaVis>();
   readonly heads = new Map<string, HeadInfo>();
+  /** Resident anchors are used only for quiet labels; input hit-testing reads `heads` only. */
+  readonly ambientHeads = new Map<string, HeadInfo>();
   exterior: ExteriorLayout;
   shells: SlotShell[] = [];
   shellWindows: WallVis[] = [];
@@ -335,15 +338,16 @@ export class Renderer {
     const ents = this.ents;
     ents.length = 0;
     let used = 0;
-    const push = (k: K, y: number, ref: Ent['ref'], area: AreaVis | null, scale: number) => {
+    const push = (k: K, y: number, ref: Ent['ref'], area: AreaVis | null, scale: number, ambient = false) => {
       let e = this.pool[used];
-      if (!e) this.pool[used] = e = { k, y, ref, area, scale };
+      if (!e) this.pool[used] = e = { k, y, ref, area, scale, ambient };
       else {
         e.k = k;
         e.y = y;
         e.ref = ref;
         e.area = area;
         e.scale = scale;
+        e.ambient = ambient;
       }
       used++;
       ents.push(e);
@@ -372,6 +376,18 @@ export class Renderer {
         continue;
       }
       push(K.Char, ch.depth(), ch, null, 1);
+    }
+    for (const ch of this.sim.ambient.chars.values()) {
+      const head = this.ambientHeadOf(ch);
+      head.visible = false;
+      if (ch.inside || ch.alpha <= 0.01 || now < ch.hiddenUntil) continue;
+      if (!visible(ch.x - 24, ch.y - 48, 48, 56)) {
+        head.x = ch.x;
+        head.y = ch.y - 26;
+        head.feetY = ch.y;
+        continue;
+      }
+      push(K.Char, ch.depth(), ch, null, 1, true);
     }
     for (const prop of this.exterior.props) {
       if (!visible(prop.x - 24, prop.y - 56, 48, 60)) continue;
@@ -415,7 +431,7 @@ export class Renderer {
           this.drawFurniture(e.ref as FurnVis, e.area!, e.scale, true, now);
           break;
         case K.Char:
-          this.drawCharacter(e.ref as Character, now, sel);
+          this.drawCharacter(e.ref as Character, now, sel, e.ambient);
           break;
         case K.Prop:
           this.drawProp(e.ref as ExteriorProp, e.scale);
@@ -470,9 +486,16 @@ export class Renderer {
     return h;
   }
 
+  private ambientHeadOf(ch: Character): HeadInfo {
+    let h = this.ambientHeads.get(ch.id);
+    if (!h) this.ambientHeads.set(ch.id, (h = { x: 0, y: 0, feetY: 0, visible: false, bx: 0, by: 0, bw: 0, bh: 0, depth: 0 }));
+    return h;
+  }
+
   /** Remove entradas de personagens que já saíram. */
   pruneHeads(): void {
     for (const id of this.heads.keys()) if (!this.sim.chars.has(id)) this.heads.delete(id);
+    for (const id of this.ambientHeads.keys()) if (!this.sim.ambient.chars.has(id)) this.ambientHeads.delete(id);
   }
 
   roomInSlot(slot: number): RoomState | undefined {
@@ -744,17 +767,19 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
-  private drawCharacter(ch: Character, now: number, sel: { agent: string | null; hover: string | null }): void {
+  private drawCharacter(ch: Character, now: number, sel: { agent: string | null; hover: string | null }, ambient = false): void {
     const { ctx } = this;
-    const head = this.headOf(ch);
+    const head = ambient ? this.ambientHeadOf(ch) : this.headOf(ch);
     // faixa lateral de quem anda (dois no mesmo caminho não viram um boneco de duas cabeças)
     const x = Math.round(ch.x + ch.offX);
     const y = Math.round(ch.y + ch.offY);
     ctx.globalAlpha = ch.alpha;
     // anéis no chão (seleção, hover, alerta)
-    if (ch.mode === 'wait') this.drawAlertRing(x, y, now);
-    if (sel.agent === ch.id) this.drawRing(x, y, '#7fe3ff', now, true);
-    else if (sel.hover === ch.id) this.drawRing(x, y, '#ffffff', now, false);
+    if (!ambient) {
+      if (ch.mode === 'wait') this.drawAlertRing(x, y, now);
+      if (sel.agent === ch.id) this.drawRing(x, y, '#7fe3ff', now, true);
+      else if (sel.hover === ch.id) this.drawRing(x, y, '#ffffff', now, false);
+    }
     if (!ch.seated) {
       const sh = shadowSprite();
       ctx.drawImage(sh.canvas, x - sh.ax, y - sh.ay);
@@ -804,6 +829,7 @@ export class Renderer {
     head.feetY = y;
     head.visible = true;
     head.depth = ch.depth();
+    if (ambient) return;
     // ícone sobre a cabeça (desenhado depois da luz)
     let name: IconName | null = ch.mode === 'wait' ? 'alert' : ch.icon;
     const shell = ch.mode === 'shell' && ch.shellSince > 0 && !ch.leaving;

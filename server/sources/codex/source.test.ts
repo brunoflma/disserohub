@@ -7,10 +7,10 @@ import type { AgentInfo, Notice } from '../../../shared/types';
 import { AccountsService } from '../../accounts/service';
 import { log, setQuiet } from '../../log';
 import { NameStore } from '../../model/names';
-import { IDLE_PRESENCE_MS, Office } from '../../model/office';
+import { DONE_GRACE_MS, IDLE_PRESENCE_MS, Office } from '../../model/office';
 import { codexHome, R, SOURCES, threadId } from '../../test/codex-fixtures';
 import { MAX_LINE_BYTES } from '../tail';
-import { CodexSource, scanPrefix } from './source';
+import { CodexSource, scanPrefix, WORKING_QUIET_MS } from './source';
 
 setQuiet(true);
 
@@ -259,6 +259,38 @@ describe('fonte do Codex: presença pelos locks', () => {
     expect(ctx.agent()).toMatchObject({ status: 'working' });
   });
 
+  it('ferramenta ainda pendente não vira ociosidade pelo silêncio do rollout', () => {
+    const ctx = setup();
+    const at = ctx.now() - 10_000;
+    const path = ctx.home.rollout(T, [
+      R.meta(T, { at, cwd: '/projetos/api' }), R.taskStarted('long', at),
+      R.functionCall('long-command', 'exec_command', { cmd: 'long-running-task' }, at + 1),
+    ]);
+    ctx.home.lock(T, at);
+    ctx.source.boot();
+    ctx.advance(WORKING_QUIET_MS + IDLE_PRESENCE_MS + 1_000);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('working');
+    ctx.home.append(path, [R.functionOutput('long-command', 'completed', ctx.now()), R.taskComplete('long', ctx.now())]);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('idle');
+    ctx.advance(IDLE_PRESENCE_MS);
+    ctx.poll();
+    expect(ctx.agent()).toBeUndefined();
+  });
+
+  it('boot com ferramenta pendente preserva trabalho longo observado no rollout', () => {
+    const ctx = setup();
+    const at = ctx.now() - WORKING_QUIET_MS - 10_000;
+    ctx.home.rollout(T, [
+      R.meta(T, { at, cwd: '/projetos/api' }), R.taskStarted('long', at),
+      R.functionCall('long-command', 'exec_command', { cmd: 'long-running-task' }, at + 1),
+    ], { mtime: at + 1 });
+    ctx.home.lock(T, at);
+    ctx.source.boot();
+    expect(ctx.agent()?.status).toBe('working');
+  });
+
   it('thread antigo carregado (lock novo, rollout parado há dias) só aparece com atividade nova', () => {
     const ctx = setup();
     const old = ctx.now() - 3 * 86_400_000;
@@ -400,6 +432,109 @@ describe('fonte do Codex: subagentes', () => {
     ctx.source.boot();
     expect(ctx.agents().map((a) => a.id)).toEqual([KEY]);
   });
+
+  it('lock antigo não traz de volta o subagente após sair e expirar no escritório; turno novo restaura a identidade', () => {
+    const ctx = setup();
+    const at = ctx.now() - 10_000;
+    ctx.home.rollout(T, [R.meta(T, { at, cwd: '/projetos/loja' }), R.taskStarted('parent', at)]);
+    const child = ctx.home.rollout(C, [
+      R.meta(C, { at: at + 1_000, sessionId: T, source: SOURCES.sub(T, 'explorer') }),
+      R.taskStarted('child-1', at + 1_000),
+      R.user(C, 'child-1', 'u-child', 'Investigue o fluxo', at + 1_100),
+    ]);
+    const childId = `.codex:${C}`;
+    ctx.home.lock(T, at);
+    ctx.home.lock(C, at + 1_000);
+    ctx.source.boot();
+    const original = ctx.agent(childId)!;
+    expect(original).toMatchObject({ kind: 'sub', parentId: KEY, status: 'working' });
+    expect(ctx.agent()?.status).toBe('working');
+
+    ctx.home.unlock(C);
+    ctx.poll();
+    ctx.advance(2_000);
+    ctx.poll();
+    expect(ctx.agent(childId)?.status).toBe('done');
+    expect(ctx.agent()?.status).toBe('working');
+
+    // Reabrir o mesmo lock/rollout antigo não é prova de uma tarefa nova.
+    ctx.home.lock(C, at + 1_000);
+    ctx.poll();
+    expect(ctx.agent(childId)?.status).toBe('done');
+    expect(ctx.agent()?.status).toBe('working');
+    ctx.advance(DONE_GRACE_MS);
+    ctx.poll();
+    expect(ctx.agent(childId)).toBeUndefined();
+    expect(ctx.agent()?.status).toBe('working');
+    ctx.poll();
+    expect(ctx.agent(childId)).toBeUndefined();
+
+    // Um marcador de turno novo no mesmo rollout restaura o mesmo personagem.
+    ctx.home.append(child, [R.taskStarted('child-2', ctx.now())]);
+    ctx.poll();
+    expect(ctx.agent(childId)).toMatchObject({ id: original.id, name: original.name, kind: 'sub', status: 'working' });
+    ctx.advance(1_000);
+    ctx.poll();
+    expect(ctx.agent(childId)?.status).toBe('working');
+    expect(ctx.agent()?.status).toBe('working');
+  });
+
+  it('turno concluído com o lock ainda presente não reaparece quando o registro do escritório expira', () => {
+    const ctx = setup();
+    const at = ctx.now() - 10_000;
+    ctx.home.rollout(T, [R.meta(T, { at, cwd: '/projetos/loja' }), R.taskStarted('parent', at)]);
+    const child = ctx.home.rollout(C, [
+      R.meta(C, { at: at + 1_000, sessionId: T, source: SOURCES.sub(T, 'explorer') }),
+      R.taskStarted('child-1', at + 1_000),
+      R.user(C, 'child-1', 'u-child', 'Investigue o fluxo', at + 1_100),
+    ]);
+    const childId = `.codex:${C}`;
+    ctx.home.lock(T, at);
+    ctx.home.lock(C, at + 1_000);
+    ctx.source.boot();
+    const original = ctx.agent(childId)!;
+    expect(original.status).toBe('working');
+
+    ctx.home.append(child, [R.taskComplete('child-1', ctx.now())]);
+    ctx.poll();
+    expect(ctx.agent(childId)?.status).toBe('done');
+    expect(ctx.agent()?.status).toBe('working');
+    ctx.advance(DONE_GRACE_MS);
+    ctx.poll();
+    expect(ctx.agent(childId)).toBeUndefined();
+    expect(ctx.agent()?.status).toBe('working');
+    ctx.poll();
+    expect(ctx.agent(childId)).toBeUndefined();
+  });
+
+  it('início novo já no rollout quando a conclusão é lida reabre o mesmo subagente', () => {
+    const ctx = setup();
+    const at = ctx.now() - 10_000;
+    ctx.home.rollout(T, [R.meta(T, { at, cwd: '/projetos/loja' }), R.taskStarted('parent', at)]);
+    const child = ctx.home.rollout(C, [
+      R.meta(C, { at: at + 1_000, sessionId: T, source: SOURCES.sub(T, 'explorer') }),
+      R.taskStarted('child-1', at + 1_000),
+      R.user(C, 'child-1', 'u-child', 'Investigue o fluxo', at + 1_100),
+    ]);
+    const childId = `.codex:${C}`;
+    ctx.home.lock(T, at);
+    ctx.home.lock(C, at + 1_000);
+    ctx.source.boot();
+    const original = ctx.agent(childId)!;
+    expect(original.status).toBe('working');
+
+    // Both source events arrive in one poll; the new task is newer than completion,
+    // even though the Office delivery activity is timestamped at read time.
+    const completedAt = ctx.now() - 10;
+    const startedAt = completedAt + 5;
+    ctx.home.append(child, [R.taskComplete('child-1', completedAt), R.taskStarted('child-2', startedAt)]);
+    ctx.poll();
+    expect(ctx.agent(childId)).toMatchObject({ id: original.id, name: original.name, kind: 'sub', status: 'working' });
+    expect(ctx.agent()?.status).toBe('working');
+    ctx.poll();
+    expect(ctx.agent(childId)?.status).toBe('working');
+    expect(ctx.agent()?.status).toBe('working');
+  });
 });
 
 describe('fonte do Codex: uso do plano', () => {
@@ -531,6 +666,31 @@ describe('fonte do Codex: eventos de hook', () => {
     expect(ctx.agent(`.codex:${C}`)?.status).toBe('working');
   });
 
+  it('sub já concluído ao iniciar ignora eventos tardios e aceita uma ferramenta nova', () => {
+    const ctx = setup();
+    const at = ctx.now() - 10_000;
+    ctx.home.rollout(T, [R.meta(T, { at, cwd: '/projetos/api' }), R.taskStarted('parent', at)]);
+    ctx.home.rollout(C, [
+      R.meta(C, { at, sessionId: T, source: SOURCES.sub(T, 'worker') }),
+      R.taskStarted('old', at + 1_000),
+      R.taskComplete('old', at + 2_000),
+    ]);
+    ctx.home.lock(T, at);
+    ctx.home.lock(C, at);
+    ctx.source.boot();
+    expect(ctx.agent(`.codex:${C}`)).toBeUndefined();
+    for (const event of ['PostToolUse', 'PreCompact', 'PostCompact']) {
+      ctx.advance(1_000);
+      ctx.hook(ev(event, { agent_id: C, tool_name: 'Bash', tool_use_id: 'old' }));
+      expect(ctx.agent(`.codex:${C}`)).toBeUndefined();
+    }
+    ctx.advance(1_000);
+    ctx.hook(ev('PreToolUse', { agent_id: C, tool_name: 'Bash', tool_use_id: 'fresh', tool_input: { command: 'npm test' } }));
+    expect(ctx.agent(`.codex:${C}`)).toMatchObject({ status: 'working', parentId: KEY });
+    ctx.poll();
+    expect(ctx.agent(`.codex:${C}`)?.status).toBe('working');
+  });
+
   it('sub descoberto durante aprovação continua trabalhando quando o comando termina', () => {
     const ctx = setup();
     ctx.source.boot();
@@ -618,6 +778,148 @@ describe('fonte do Codex: eventos de hook', () => {
     ctx.advance(6_000);
     ctx.poll();
     expect(ctx.agent()?.status).toBe('offline');
+  });
+
+  it('resultado ou compactação atrasados não reabrem uma sessão principal encerrada', () => {
+    const ctx = setup();
+    ctx.source.boot();
+    ctx.hook(ev('UserPromptSubmit', { prompt: 'Trabalhe no projeto' }));
+    ctx.hook(ev('SessionEnd'));
+    expect(ctx.agent()?.status).toBe('offline');
+    for (const event of ['PostToolUse', 'PreCompact', 'PostCompact']) {
+      ctx.advance(1_000);
+      ctx.hook(ev(event, { tool_name: 'Bash', tool_use_id: 'old' }));
+      expect(ctx.agent()?.status).toBe('offline');
+    }
+    ctx.advance(1_000);
+    ctx.hook(ev('UserPromptSubmit', { prompt: 'Tarefa realmente nova' }));
+    expect(ctx.agent()?.status).toBe('working');
+  });
+
+  it.each(['Stop', 'Interrupt'])('%s não é desfeito por resultado ou compactação atrasados', (endEvent) => {
+    const ctx = setup();
+    ctx.source.boot();
+    ctx.hook(ev('UserPromptSubmit', { prompt: 'Primeira tarefa' }));
+    ctx.advance(1_000);
+    ctx.hook(ev(endEvent));
+    expect(ctx.agent()?.status).toBe('idle');
+    for (const event of ['PostToolUse', 'PreCompact', 'PostCompact']) {
+      ctx.advance(1_000);
+      ctx.hook(ev(event, { tool_name: 'Bash', tool_use_id: 'old' }));
+      expect(ctx.agent()?.status).toBe('idle');
+    }
+    ctx.hook(ev('PreToolUse', { tool_name: 'Bash', tool_use_id: 'new', tool_input: { command: 'new-command' } }));
+    expect(ctx.agent()?.status).toBe('working');
+  });
+
+  it.each(['SessionEnd', 'Stop', 'Interrupt'].flatMap((endEvent) => [false, true].map((newTool) => ({ endEvent, newTool }))))('$endEvent descarta ferramenta antiga sem perder ferramenta nova ($newTool)', ({ endEvent, newTool }) => {
+    const ctx = setup();
+    const at = ctx.now() - 10_000;
+    const path = ctx.home.rollout(T, [
+      R.meta(T, { at, cwd: '/projetos/api' }),
+      R.taskStarted('old', at),
+      R.functionCall('abandoned', 'exec_command', { cmd: 'old-command' }, at + 1),
+    ]);
+    ctx.home.lock(T, at);
+    ctx.source.boot();
+    ctx.hook(ev(endEvent));
+    ctx.advance(6_000);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe(endEvent === 'SessionEnd' ? 'offline' : 'idle');
+    ctx.advance(1_000);
+    ctx.hook(ev('UserPromptSubmit', { prompt: 'Próxima tarefa' }));
+    if (newTool) {
+      ctx.advance(1);
+      ctx.home.append(path, [R.functionCall('new-command', 'exec_command', { cmd: 'new-command' }, ctx.now())]);
+      ctx.poll();
+    }
+    ctx.advance(WORKING_QUIET_MS + 1_000);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe(newTool ? 'working' : 'idle');
+  });
+
+  it('chamada antiga lida depois do encerramento não contamina a tarefa retomada', () => {
+    const ctx = setup();
+    const at = ctx.now() - 10_000;
+    const path = ctx.home.rollout(T, [R.meta(T, { at, cwd: '/projetos/api' }), R.taskStarted('old', at)]);
+    ctx.home.lock(T, at);
+    ctx.source.boot();
+    ctx.hook(ev('SessionEnd'));
+    ctx.advance(6_000);
+    ctx.poll();
+    ctx.advance(1_000);
+    ctx.hook(ev('UserPromptSubmit', { prompt: 'Tarefa nova sem ferramenta' }));
+    ctx.home.append(path, [R.functionCall('late-old', 'exec_command', { cmd: 'old-command' }, at + 1)]);
+    ctx.poll();
+    ctx.advance(WORKING_QUIET_MS + 1_000);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('idle');
+  });
+
+  it('hooks acompanham comando longo e encerram somente a chamada correspondente', () => {
+    const ctx = setup();
+    const at = ctx.now() - 10_000;
+    ctx.home.rollout(T, [R.meta(T, { at, cwd: '/projetos/api' }), R.taskStarted('turn', at)]);
+    ctx.home.lock(T, at);
+    ctx.source.boot();
+    for (const id of ['first', 'second']) ctx.hook(ev('PreToolUse', { tool_use_id: id, tool_name: 'Bash', tool_input: { command: 'long-command' } }));
+    ctx.advance(WORKING_QUIET_MS + 1_000);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('working');
+    ctx.hook(ev('PostToolUse', { tool_use_id: 'first', tool_response: {} }));
+    ctx.advance(WORKING_QUIET_MS + 1_000);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('working');
+    ctx.hook(ev('PostToolUse', { tool_use_id: 'second', tool_response: {} }));
+    ctx.advance(WORKING_QUIET_MS + 1_000);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('idle');
+  });
+
+  it('início explícito no mesmo milissegundo retoma a sessão encerrada', () => {
+    const ctx = setup();
+    ctx.source.boot();
+    ctx.hook(ev('UserPromptSubmit', { prompt: 'Primeira tarefa' }));
+    ctx.hook(ev('SessionEnd'));
+    expect(ctx.agent()?.status).toBe('offline');
+    ctx.hook(ev('UserPromptSubmit', { prompt: 'Próxima tarefa' }));
+    expect(ctx.agent()?.status).toBe('working');
+  });
+
+  it('evento tardio do filho não recria o pai encerrado após expirar os registros', () => {
+    const ctx = setup();
+    ctx.source.boot();
+    ctx.hook(ev('UserPromptSubmit', { prompt: 'Trabalhe no projeto' }));
+    ctx.hook(ev('SubagentStart', { agent_id: C }));
+    ctx.hook(ev('SessionEnd'));
+    ctx.advance(61_000);
+    ctx.poll();
+    ctx.advance(30_000);
+    ctx.poll();
+    expect(ctx.agent()).toBeUndefined();
+    ctx.hook(ev('PostToolUse', { agent_id: C, tool_name: 'Bash', tool_use_id: 'old' }));
+    expect(ctx.agent()).toBeUndefined();
+    expect(ctx.agent(`.codex:${C}`)).toBeUndefined();
+  });
+
+  it('lock recriado sem tarefa nova não desfaz SessionEnd', () => {
+    const ctx = setup();
+    const at = ctx.now() - 10_000;
+    const path = ctx.home.rollout(T, [R.meta(T, { at, cwd: '/projetos/api' }), R.taskStarted('old', at)]);
+    ctx.home.lock(T, at);
+    ctx.source.boot();
+    ctx.hook(ev('SessionEnd'));
+    ctx.advance(6_000);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('offline');
+    ctx.home.unlock(T);
+    ctx.home.lock(T, ctx.now());
+    ctx.advance(4_000);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('offline');
+    ctx.home.append(path, [R.taskStarted('fresh', ctx.now())]);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('working');
   });
 
   it('Docker sem a pasta de locks montada: o hook dá presença; sem eventos por 60 s, sai', () => {

@@ -387,6 +387,8 @@ export interface CodexState {
   stats: AgentStats;
   /** Turno aberto (task_started sem task_complete/turn_aborted); undefined = nenhum evento de turno visto. */
   turnOpen?: boolean;
+  /** Último término explícito: chamadas antigas lidas depois dele não continuam em execução. */
+  turnEndedAt?: number;
   firstAt?: number;
   lastAt?: number;
   /** Chamadas de ferramenta ainda sem resultado (call_id → nome). */
@@ -402,6 +404,20 @@ export function createCodexState(meta?: RolloutMeta): CodexState {
   const s: CodexState = { tasks: [], stats: { toolCalls: 0, tokensIn: 0, tokensOut: 0, subagents: 0 }, pending: new Map(), questions: new CodexQuestions() };
   if (meta) applyMeta(s, meta);
   return s;
+}
+
+export function endCodexTurn(s: CodexState, at: number): void {
+  s.turnOpen = false;
+  s.turnEndedAt = Math.max(s.turnEndedAt ?? 0, at);
+  s.pending.clear();
+  s.questions.endTurn(at);
+}
+
+/** Início observado; hooks ao vivo também distinguem ações no mesmo milissegundo do término. */
+export function startCodexCall(s: CodexState, callId: string | undefined, name: string, at: number, live = false): void {
+  if (!callId || (s.turnEndedAt !== undefined && (at < s.turnEndedAt || (!live && at === s.turnEndedAt)))) return;
+  s.pending.set(callId, name);
+  if (s.pending.size > MAX_PENDING) s.pending.delete(s.pending.keys().next().value as string);
 }
 
 /** Aplica o session_meta ao estado (formato, branch). */
@@ -640,9 +656,7 @@ class RolloutLineParser {
   }
 
   private endTurn(aborted: boolean): void {
-    this.s.turnOpen = false;
-    this.s.pending.clear();
-    this.s.questions.endTurn(this.at);
+    endCodexTurn(this.s, this.at);
     this.out.signals.push({ type: 'turnEnd', aborted });
   }
 
@@ -856,10 +870,7 @@ class RolloutLineParser {
         const input = p.type === 'custom_tool_call' ? { input: p.input, command: p.input } : parseArguments(p.arguments);
         const { desc, tool } = describeCodexTool(name, input, str(p.namespace));
         if (this.s.questions.start(callId, tool, input, this.at, this.ctx.idPrefix)) this.out.signals.push({ type: 'questions' });
-        if (callId) {
-          this.s.pending.set(callId, name);
-          if (this.s.pending.size > MAX_PENDING) this.s.pending.delete(this.s.pending.keys().next().value as string);
-        }
+        startCodexCall(this.s, callId, name, this.at);
         if (this.s.mode === 'legacy') {
           this.s.stats.toolCalls++;
           this.changed();
@@ -877,7 +888,7 @@ class RolloutLineParser {
       }
       case 'local_shell_call': {
         const callId = str(p.call_id) ?? str(p.id);
-        if (callId) this.s.pending.set(callId, 'local_shell');
+        startCodexCall(this.s, callId, 'local_shell', this.at);
         if (this.s.mode === 'legacy') {
           this.s.stats.toolCalls++;
           this.changed();

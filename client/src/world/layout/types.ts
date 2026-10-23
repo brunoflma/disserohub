@@ -74,6 +74,7 @@ export interface RugPatch {
 }
 
 export type SpotKind =
+  | 'reception_staff' // posto exclusivo da recepção, independente das sessões
   | 'desk' // lugar de trabalho (mesa + cadeira)
   | 'stool' // banqueta da mesa de reunião
   | 'nook' // poltrona/puff dentro da sala de projeto (lugar extra de trabalho, com notebook)

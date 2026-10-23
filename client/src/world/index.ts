@@ -23,7 +23,10 @@ export type { WorldDebug } from './debug';
 const art: ArtModule = artModule;
 
 export function createWorld(canvas: HTMLCanvasElement, store: OfficeStore): WorldApi & { debug: WorldDebug } {
-  let options: WorldOptions = { ...DEFAULT_WORLD_OPTIONS };
+  const motionPreference = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+  let options: WorldOptions = { ...DEFAULT_WORLD_OPTIONS, reducedMotion: motionPreference?.matches ?? false };
+  const onMotionPreference = () => { options = { ...options, reducedMotion: motionPreference?.matches ?? false }; };
+  motionPreference?.addEventListener('change', onMotionPreference);
   const camera = new Camera();
   // Simulação e desenho são recriados quando o timelapse entra, pula ou sai (rebuild).
   let sim = new Sim(art, () => options);
@@ -375,7 +378,8 @@ export function createWorld(canvas: HTMLCanvasElement, store: OfficeStore): Worl
   const rebuild = () => {
     // As carteiras ao vivo gravam a cada 5 s: não perde o que mudou desde a última vez (no replay, não grava nada).
     sim.social.wallets.save(Date.now());
-    sim = new Sim(art, () => options, playback ? null : undefined);
+    sim.ambient.clear();
+    sim = new Sim(art, () => playback ? { ...options, ambientLife: false } : options, playback ? null : undefined);
     renderer = new Renderer(canvas, art, sim, camera);
     if (assets) renderer.setAssets(assets);
     if (playback) {
@@ -467,6 +471,8 @@ export function createWorld(canvas: HTMLCanvasElement, store: OfficeStore): Worl
       return () => void soundCbs.delete(cb);
     },
     destroy: () => {
+      sim.ambient.clear();
+      motionPreference?.removeEventListener('change', onMotionPreference);
       cancelAnimationFrame(raf);
       abort.abort();
       offSnapshot();

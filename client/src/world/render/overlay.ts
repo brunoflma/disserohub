@@ -93,6 +93,7 @@ interface Label {
   ch: Character;
   head: HeadInfo;
   prio: number;
+  ambient?: boolean;
   /** Etiqueta acima da cabeça (quem senta de frente para a câmera atrás de uma mesa). */
   above: boolean;
   compact: boolean;
@@ -325,7 +326,29 @@ export class Overlay {
           l.prio = prio;
           l.above = above;
         }
+        l.ambient = false;
         l.compact = zoom < 2.5 && !selected && !hovered;
+        this.nl++;
+        items.push(l);
+      }
+    }
+    if (showAll) {
+      for (const ch of this.sim.ambient.chars.values()) {
+        const head = this.renderer.ambientHeads.get(ch.id);
+        if (!head || !head.visible) continue;
+        const hx = this.sx(head.x);
+        const hy = this.sy(head.y);
+        if (hx < -120 || hx > vw + 120 || hy < -60 || hy > vh + 80) continue;
+        let l = this.labelPool[this.nl];
+        if (!l) this.labelPool[this.nl] = l = { type: 'label', ch, head, prio: 30, above: this.labelAbove(ch), compact: false, x: 0, y: 0, w: 0, h: 0, ambient: true };
+        else {
+          l.ch = ch;
+          l.head = head;
+          l.prio = 30;
+          l.above = this.labelAbove(ch);
+        }
+        l.ambient = true;
+        l.compact = false;
         this.nl++;
         items.push(l);
       }
@@ -856,6 +879,7 @@ export class Overlay {
   /** Larguras das partes da etiqueta. O selo "CHATGPT" (como o "SUB") só aparece fora do modo compacto. */
   private labelWidth(l: Label): { nameW: number; chipW: number; badgeW: number; codexW: number } {
     const ch = l.ch;
+    if (l.ambient) return { nameW: this.measure(LABEL_FONT, this.ambientLabelText(ch)), chipW: 0, badgeW: 0, codexW: 0 };
     const acc = this.sim.accounts.get(ch.info.account);
     const nameW = this.measure(LABEL_FONT, ch.info.name);
     const chipW = acc ? 16 : 0;
@@ -889,6 +913,19 @@ export class Overlay {
   private drawLabel(l: Label, sel: { agent: string | null; hover: string | null }): void {
     const { ctx } = this;
     const ch = l.ch;
+    if (l.ambient) {
+      const { x, y, w, h } = l;
+      ctx.save();
+      ctx.fillStyle = 'rgba(35,48,59,0.9)';
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 7.5);
+      ctx.fill();
+      ctx.font = LABEL_FONT;
+      ctx.fillStyle = '#e6edf2';
+      ctx.fillText(this.ambientLabelText(ch), x + 6, y + h / 2 + 0.5);
+      ctx.restore();
+      return;
+    }
     const acc = this.sim.accounts.get(ch.info.account);
     const sub = ch.info.kind === 'sub';
     const codex = ch.info.provider === 'codex' || acc?.provider === 'codex';
@@ -957,6 +994,10 @@ export class Overlay {
       ctx.fillStyle = '#e8ecf5';
       ctx.fillText(CODEX_BADGE, cx + 3.5, y + h / 2 + 0.5);
     }
+  }
+
+  private ambientLabelText(ch: Character): string {
+    return `${ch.info.name} · ${ch.info.role}`;
   }
 }
 

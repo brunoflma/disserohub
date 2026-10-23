@@ -162,6 +162,7 @@ export class SettingsPopover implements UiComponent {
         this.bubbles.row,
         this.liveliness.row,
         this.daylight.row,
+        sw('ambientLife', tr('Vida no escritório'), tr('Recepção e visitantes de segunda a sexta, das 8h às 18h, no horário deste aparelho. Não representam sessões de agentes.'), flip('ambientLife')),
         sw('economy', tr('Modo econômico'), tr('Desenha o escritório a 30 quadros por segundo. Dados, perguntas e avisos continuam atualizados.'), flip('economy')),
       ),
       h(

@@ -21,6 +21,10 @@ export interface WorldOptions {
   theme?: OfficeTheme;
   /** Reduce canvas rendering to 30 frames/s without changing agent data. */
   economy?: boolean;
+  /** Equipe e visitantes do cenário durante o expediente, sem sessões ou chamadas de IA. */
+  ambientLife?: boolean;
+  /** Preferência do sistema: mantém as pessoas do cenário em poses estáticas. */
+  reducedMotion?: boolean;
   /** Legal-office reading and discussions, independently of seasonal decoration. */
   legalOffice?: boolean;
 }
