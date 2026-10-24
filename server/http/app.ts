@@ -25,8 +25,11 @@ import { HOST_WAIT_MS } from '../host-wait';
 import type { ProjectFolders } from '../projects/folders';
 import { parsePreferenceEntries, PREFERENCE_BODY_MAX, PREFERENCE_TRANSFER_PATH } from '../../shared/branding';
 import { PreferenceTransfers, preferenceTransferRole } from './branding';
+import { installRoute } from '../updates/http';
+import type { UpdateInstaller } from '../updates/installer';
 
 export interface ApiDeps {
+  installer?: UpdateInstaller;
   office: Office;
   hub: Hub;
   accounts: AccountsService;
@@ -730,6 +733,12 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       if (method !== 'POST') methodNotAllowed(res, 'POST');
       else if (isRemote(req)) sendJson(res, 403, { error: tr('não liberado no acesso remoto (veja HABBLAUD_REMOTE_ALLOW)') });
       else handleDemo(req, res).catch((err) => fail(res, err));
+      return true;
+    }
+    if (path === '/api/updates/install') {
+      void installRoute(req, res, deps.installer, isRemote(req)).catch(() => {
+        if (!res.headersSent) sendJson(res, 503, { error: 'Instalador temporariamente indisponível.' });
+      });
       return true;
     }
     if (path === '/api/updates') {

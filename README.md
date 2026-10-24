@@ -25,11 +25,13 @@ Os identificadores internos `habblaud`, as variáveis `HABBLAUD_*` e o diretóri
 
 ## Atualizações
 
-**Verificar agora** apenas consulta versões: não baixa nem instala código. As consultas e os links de atualização usam exclusivamente `brunoflma/disserohub`. Uma versão publicada pelo Habblaud não é uma atualização do Dissero.
+Em **Configurações → Sobre**, **Verificar agora** consulta versões e **Atualizar para v…** instala a versão estável mais recente. O instalador está disponível no serviço nativo Windows preparado com o launcher de atualização. A ação exige abrir a página no próprio computador e encerrar os terminais criados pelo Dissero. As consultas e instalações usam exclusivamente `brunoflma/disserohub`.
 
 Se a cota anônima do GitHub se esgotar e o GitHub CLI já estiver instalado e autenticado localmente, o servidor usa essa sessão existente somente para consultar as releases públicas deste repositório. Nenhum token é incluído no aplicativo ou nas requisições anônimas. O CLI é opcional; sem ele, a verificação aguarda a cota normal voltar.
 
-A atualização é administrada. Pare o serviço, faça backup do diretório de dados e confira `git status --porcelain` na instalação. Se houver modificações, preserve e integre essas alterações em um candidato separado antes de continuar. Em uma instalação sem alterações, selecione a tag aprovada nas releases do DisseroHub, execute `npm ci` e `npm run build` e então reinicie o serviço. Preserve a instalação anterior até validar a nova versão.
+O instalador baixa a tag oficial em uma pasta separada, instala suas dependências, verifica os tipos e compila antes de trocar o serviço. O progresso aparece no painel; a página recarrega quando a versão, o instalador e os arquivos do cliente forem confirmados. Se a inicialização falhar, o serviço retorna à instalação anterior. Os dados e a configuração dos agentes permanecem no diretório existente. Sessões externas do Claude e Codex continuam abertas.
+
+Execuções de desenvolvimento, Docker e instalações sem o launcher mantêm atualização administrada: preserve as alterações locais e os dados, prepare a tag aprovada em uma pasta separada com `npm ci` e `npm run build` e só então troque o serviço. Preserve a instalação anterior até validar a nova versão.
 
 Não instale o pacote oficial do Habblaud sobre uma instalação do Dissero. O código público permite contribuições, mas a distribuição do Dissero utiliza apenas releases deste fork.
 

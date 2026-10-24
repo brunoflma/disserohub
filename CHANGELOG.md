@@ -10,6 +10,15 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+## [1.0.3.4] - 2026-10-24
+
+### Atualização pelo próprio Dissero
+
+- **Configurações → Sobre → Atualizar para v…** baixa e instala a versão estável mais recente do DisseroHub no serviço nativo Windows gerenciado. O painel mostra download, dependências, compilação e reinício, e recarrega após confirmar a nova versão.
+- A instalação é preparada em uma pasta separada. Os dados e as sessões externas do Claude e Codex permanecem preservados. Terminais abertos no próprio Dissero precisam ser encerrados antes da atualização.
+- Se a nova versão não iniciar corretamente, o serviço volta à instalação anterior. A recuperação também cobre interrupção do instalador durante a troca.
+- A instalação exige a página local, a versão exata exibida e uma release oficial compatível. Execuções de desenvolvimento, Docker e serviços sem o launcher informam que a instalação automática não está disponível.
+
 ## [1.0.3.3] - 2026-10-23
 
 ### Adicionado

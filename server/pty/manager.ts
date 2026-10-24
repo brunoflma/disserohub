@@ -67,6 +67,7 @@ export interface PtyScreen {
 export type ScreenFactory = (cols: number, rows: number) => PtyScreen;
 
 export interface PtyManagerOptions {
+  canStart?: () => boolean;
   spawn: SpawnPty | null;
   /** Por que o recurso está desligado (quando `spawn` é null). */
   disabledReason?: string;
@@ -221,8 +222,17 @@ export class PtyManager {
     return [...this.ptys.values()].map((t) => ({ ...t.info }));
   }
 
+  hasLiveOrPending(): boolean {
+    return this.takeovers.size > 0 || [...this.ptys.values()].some((t) => t.info.exitedAt === undefined);
+  }
+
+  private admit(): void {
+    if (this.opts.canStart && !this.opts.canStart()) throw new PtyError(409, 'Aguarde a atualização do Dissero concluir para abrir um terminal.');
+  }
+
   /** Abre uma sessão nova do Claude Code na pasta (`cwd` absoluto), na conta pedida (ou na padrão). */
   create(p: { cwd: unknown; account?: unknown; cols?: unknown; rows?: unknown }): PtyInfo {
+    this.admit();
     return this.spawn(this.plan(p, this.takeovers.size));
   }
 
@@ -252,6 +262,7 @@ export class PtyManager {
    * (pasta, conta, limite) é conferido antes de encerrar a de lá; pedidos repetidos esperam o primeiro.
    */
   takeover(agentId: string, size: { cols?: unknown; rows?: unknown } = {}): Promise<PtyInfo> {
+    try { this.admit(); } catch (error) { return Promise.reject(error); }
     const pending = this.takeovers.get(agentId);
     if (pending) return pending;
     const run = this.doTakeover(agentId, size).finally(() => this.takeovers.delete(agentId));

@@ -1,0 +1,35 @@
+import { execFile } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import { build } from 'esbuild';
+import { afterEach, expect, it } from 'vitest';
+import { atomicJson, decision, transactionDir, updateDir } from './state';
+
+const exec = promisify(execFile);
+const dirs: string[] = [];
+afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+it('runs the actual bundled bootstrap in separate processes and restores legacy after failed candidate import', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dissero-bootstrap-test-'));
+  dirs.push(root);
+  writeFileSync(join(root, 'package.json'), '{"type":"module"}');
+  const app = join(root, 'dist', 'server');
+  mkdirSync(app, { recursive: true });
+  const entry = join(app, 'index.js');
+  await build({ entryPoints: [fileURLToPath(new URL('bootstrap.ts', import.meta.url))], outfile: entry, bundle: true, platform: 'node', format: 'esm', logLevel: 'silent' });
+  writeFileSync(join(app, 'index.legacy.js'), 'console.log("RESTORED_LEGACY");');
+  const id = 'c'.repeat(32);
+  const target = { dir: 'v1.0.3.4-123456789abc-cccccccc', version: '1.0.3.4', sha: '1'.repeat(40) };
+  const candidate = join(root, 'releases', target.dir, 'dist', 'server');
+  mkdirSync(candidate, { recursive: true });
+  writeFileSync(join(candidate, 'index.js'), 'throw new Error("candidate startup fixture failure");');
+  atomicJson(join(transactionDir(root, id), 'transaction.json'), { protocol: 1, target, previous: null, deadline: Date.now() + 10000 });
+  atomicJson(join(updateDir(root), 'active.json'), { id });
+  const options = { env: { ...process.env, HABBLAUD_DATA_DIR: root }, windowsHide: true, timeout: 10000 };
+  await expect(exec(process.execPath, [entry], options)).rejects.toMatchObject({ code: 1 });
+  expect(decision(root, id)).toBe('rollback');
+  const restored = await exec(process.execPath, [entry], options);
+  expect(restored.stdout.trim()).toBe('RESTORED_LEGACY');
+}, 20000);

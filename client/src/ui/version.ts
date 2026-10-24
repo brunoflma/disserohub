@@ -9,6 +9,8 @@ import { pixelIcon } from './icons';
 import { safeLocalStorage } from './prefs';
 import { tr } from '../../../shared/i18n';
 import { UPSTREAM_BASE_VERSION, UPSTREAM_REFERENCE_VERSION } from '../../../shared/distribution';
+import type { UpdateInstallStatus } from '../../../shared/update-install';
+import { UpdateInstallController, type UpdateInstallIssue } from '../net/update-install';
 
 /** Última versão nova já avisada neste navegador (o aviso sai uma vez por versão). */
 export const UPDATE_SEEN_KEY = 'habblaud:update-seen';
@@ -128,23 +130,46 @@ export class AboutGroup {
   private fresh: HTMLElement;
   private notes: HTMLAnchorElement;
   private repo: HTMLAnchorElement;
+  private installBtn: HTMLButtonElement;
+  private installStatus: HTMLElement;
+  private installHint: HTMLElement;
+  private installer: UpdateInstallController;
   private checking = false;
   private failure: string | undefined;
+  private installNotice: string | undefined;
 
   constructor(private ctx: UiContext) {
+    this.installer = new UpdateInstallController({
+      currentVersion: () => versionInfo(ctx.store.liveSnapshot)?.version,
+      onChange: () => ctx.invalidate(),
+      reload: () => window.location.reload(),
+    });
     this.name = h('strong', { class: 'ui-about__version' });
     this.checkBtn = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Verificar agora'), on: { click: () => void this.check() } });
     this.status = h('p', { class: 'ui-about__status', role: 'status' });
+    this.installBtn = h('button', {
+      class: 'ui-btn ui-btn--sm',
+      type: 'button',
+      hidden: true,
+      on: { click: () => void this.installLatest() },
+    });
+    this.installStatus = h('p', {
+      class: 'ui-about__status',
+      role: 'status',
+      attrs: { 'aria-live': 'polite' },
+      hidden: true,
+    });
+    this.installHint = h(
+      'p',
+      { class: 'ui-set__hint', text: tr('Seus dados serão preservados. O Dissero pode reiniciar por alguns instantes; Claude e Codex não serão reiniciados.'), hidden: true },
+    );
     this.notes = h('a', { class: 'ui-link-btn', attrs: { target: '_blank', rel: 'noopener noreferrer' } });
     this.fresh = h(
       'div',
       { class: 'ui-about__new', hidden: true },
       this.notes,
-      h(
-        'p',
-        { class: 'ui-set__hint' },
-        tr('Instale somente versões publicadas pelo DisseroHub. Consulte as novidades acima para as instruções de atualização.'),
-      ),
+      this.installBtn,
+      this.installHint,
     );
     this.repo = h('a', { class: 'ui-link-btn', text: tr('Código no GitHub'), attrs: { target: '_blank', rel: 'noopener noreferrer' } });
     this.el = h(
@@ -155,13 +180,16 @@ export class AboutGroup {
       h('div', { class: 'ui-about__head' }, h('span', { class: 'ui-about__name' }, 'Dissero ', this.name), this.checkBtn),
       this.status,
       this.fresh,
+      this.installStatus,
       this.repo,
     );
+    document.addEventListener('visibilitychange', () => this.installer.setActive(this.visible()));
   }
 
   render(): void {
     const info = versionInfo(this.ctx.store.liveSnapshot);
     setHidden(this.el, !info);
+    this.installer.setActive(!!info && this.visible());
     if (!info) return;
     const s = info.updates;
     setText(this.name, `v${info.version}`);
@@ -179,6 +207,7 @@ export class AboutGroup {
       setHidden(this.notes, !url);
       if (url) setAttr(this.notes, 'href', url);
     }
+    this.renderInstaller(fresh, s?.latest);
     const repoUrl = s?.repo ? safeGithubUrl(`https://github.com/${s.repo}`) : undefined;
     setHidden(this.repo, !repoUrl);
     if (repoUrl) setAttr(this.repo, 'href', repoUrl);
@@ -193,7 +222,7 @@ export class AboutGroup {
   }
 
   private async check(): Promise<void> {
-    if (this.checking) return;
+    if (this.checking || this.installer.busy) return;
     this.checking = true;
     this.failure = undefined;
     this.render();
@@ -201,6 +230,124 @@ export class AboutGroup {
       if (!(await this.ctx.store.checkUpdates())) this.failure = tr('Não deu para falar com o servidor do Dissero.');
     } catch {
       this.failure = tr('Não deu para falar com o servidor do Dissero.');
+    } finally {
+      this.checking = false;
+      this.render();
+      this.ctx.invalidate();
+    }
+  }
+
+  private visible(): boolean {
+    if (!this.el.isConnected || this.el.hidden || document.visibilityState === 'hidden') return false;
+    if (typeof this.el.checkVisibility === 'function') return this.el.checkVisibility();
+    return this.el.getClientRects().length > 0;
+  }
+
+  private renderInstaller(fresh: boolean, latest: string | undefined): void {
+    const status = this.installer.status;
+    const issue = this.installer.issue;
+    const supported = status?.supported;
+    const terminalFailure = status?.phase === 'error' || status?.phase === 'rolled-back';
+    const actionAvailable = fresh && (supported === true || (!status && !!issue));
+    const actionLabel = this.installActionLabel(latest, status, issue, terminalFailure);
+    setHidden(this.installBtn, !actionAvailable || !actionLabel);
+    setText(this.installBtn, actionLabel ?? '');
+    this.installBtn.disabled = this.installer.busy || this.checking || this.ctx.store.connection !== 'open';
+    setHidden(this.installHint, !fresh || supported !== true);
+
+    const line = this.installStatusLine(fresh, status, issue);
+    setHidden(this.installStatus, !line.text || (!fresh && !this.installer.busy));
+    setText(this.installStatus, line.text);
+    setVariant(this.installStatus, 'is-', line.tone);
+    this.checkBtn.disabled = this.checking || this.installer.busy || this.ctx.store.connection !== 'open';
+  }
+
+  private installActionLabel(
+    latest: string | undefined,
+    status: UpdateInstallStatus | undefined,
+    issue: UpdateInstallIssue | undefined,
+    terminalFailure: boolean,
+  ): string | undefined {
+    if (!latest) return undefined;
+    if (this.installNotice) return tr('Verificar novamente');
+    if (issue === 'status-unavailable' || issue === 'version-changed' || issue === 'health-timeout' || issue === 'health-check') {
+      return tr('Verificar novamente');
+    }
+    if (status?.phase === 'done' && this.installer.target !== versionInfo(this.ctx.store.liveSnapshot)?.version) {
+      return tr('Verificar novamente');
+    }
+    if (terminalFailure || issue === 'install-unavailable') return tr('Tentar novamente');
+    if (status?.supported === true) return tr('Atualizar para v{0}', [latest]);
+    if (!status && issue) return tr('Verificar novamente');
+    return undefined;
+  }
+
+  private installStatusLine(
+    fresh: boolean,
+    status: UpdateInstallStatus | undefined,
+    issue: UpdateInstallIssue | undefined,
+  ): { tone: UpdateTone; text: string } {
+    if (issue === 'status-unavailable') return { tone: 'warn', text: this.installer.busy ? tr('Conexão interrompida. Aguardando o servidor de atualização…') : tr('Não foi possível consultar a disponibilidade da instalação.') };
+    if (issue === 'version-changed') {
+      return { tone: 'warn', text: this.installer.issueMessage ?? (status?.target ? tr('O servidor já prepara v{0}. Confira a versão disponível antes de continuar.', [status.target]) : tr('A versão disponível mudou. Confira a verificação antes de tentar outra vez.')) };
+    }
+    if (status) {
+      switch (status.phase) {
+        case 'preparing': return { tone: 'pending', text: status.message ?? (status.target ? tr('Preparando a atualização para v{0}…', [status.target]) : tr('Preparando a atualização…')) };
+        case 'downloading': return { tone: 'pending', text: status.message ?? (status.target ? tr('Baixando v{0}…', [status.target]) : tr('Baixando a versão…')) };
+        case 'dependencies': return { tone: 'pending', text: status.message ?? (status.target ? tr('Instalando dependências de v{0}…', [status.target]) : tr('Instalando dependências…')) };
+        case 'building': return { tone: 'pending', text: status.message ?? (status.target ? tr('Preparando o Dissero v{0}…', [status.target]) : tr('Preparando o Dissero…')) };
+        case 'restarting': return { tone: 'pending', text: status.message ?? (status.target ? tr('Reiniciando o Dissero v{0}…', [status.target]) : tr('Reiniciando o Dissero…')) };
+      }
+    }
+    if (this.installer.busy) return { tone: 'pending', text: tr('Iniciando a atualização…') };
+    if (issue === 'install-unavailable') return { tone: 'warn', text: tr('Não foi possível iniciar a atualização. Tente novamente.') };
+    if (issue === 'health-check') return { tone: 'pending', text: tr('Aguardando o Dissero reiniciar para confirmar a versão…') };
+    if (issue === 'health-timeout') return { tone: 'warn', text: tr('Não foi possível confirmar a nova versão. A página continua aberta; tente verificar novamente.') };
+    if (this.installNotice && fresh) return { tone: 'warn', text: this.installNotice };
+    if (status?.phase === 'done' && this.installer.target !== versionInfo(this.ctx.store.liveSnapshot)?.version) {
+      return { tone: 'pending', text: tr('Conferindo se v{0} está respondendo…', [this.installer.target ?? '']) };
+    }
+    if (status?.phase === 'done' && this.installer.target) return { tone: 'ok', text: status.message ?? tr('Atualização para v{0} concluída.', [this.installer.target]) };
+    if (status?.phase === 'rolled-back') return { tone: 'warn', text: status.message ?? tr('A atualização falhou e a versão anterior foi retomada. Você pode tentar de novo.') };
+    if (status?.phase === 'error') return { tone: 'warn', text: status.message ?? tr('A atualização falhou. Você pode tentar de novo.') };
+    if (status?.supported === false && fresh) return { tone: 'off', text: status.reason ?? tr('A instalação pelo botão não está disponível neste ambiente.') };
+    if (!status && fresh) return { tone: 'pending', text: tr('Verificando se esta instalação pode ser atualizada…') };
+    return { tone: 'off', text: '' };
+  }
+
+  private async installLatest(): Promise<void> {
+    if (this.installer.busy || this.checking) return;
+    const latest = versionInfo(this.ctx.store.liveSnapshot)?.updates?.latest;
+    if (!latest) return;
+    if (this.installNotice) {
+      this.installNotice = undefined;
+      await this.refreshInstallerAndVersions();
+      return;
+    }
+    const result = await this.installer.retry(latest);
+    if (result === 'conflict') {
+      this.installNotice = this.installer.issueMessage ?? tr('A versão disponível mudou. Confira a verificação antes de tentar outra vez.');
+      this.ctx.invalidate();
+      await this.refreshInstallerAndVersions();
+    } else {
+      this.installNotice = undefined;
+    }
+    this.render();
+    this.ctx.invalidate();
+  }
+
+  private async refreshInstallerAndVersions(): Promise<void> {
+    this.checking = true;
+    this.render();
+    this.ctx.invalidate();
+    try {
+      if (!(await this.ctx.store.checkUpdates())) this.installNotice = tr('Não foi possível atualizar a verificação de versões.');
+    } catch {
+      this.installNotice = tr('Não foi possível atualizar a verificação de versões.');
+    }
+    try {
+      await this.installer.refresh();
     } finally {
       this.checking = false;
       this.render();

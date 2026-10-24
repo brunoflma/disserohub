@@ -42,6 +42,7 @@ import { CodexSource } from './sources/codex/source';
 import { createBuildReader } from './build';
 import { UpdateChecker } from './updates/checker';
 import { createGithubReleaseFetch } from './updates/github';
+import { UpdateInstaller } from './updates/installer';
 import { setLocale, tr } from '../shared/i18n';
 import { createCliRunner, createOpener, SpawnService } from './spawn/spawn';
 import { runnableClaudeBin } from './claude-bin';
@@ -251,9 +252,11 @@ else {
     if (screen.reason) log.warn(tr('Terminal interativo sem a tela completa ({0}): ao reconectar, modos como a colagem entre colchetes podem se perder.', [screen.reason]));
   }
 }
+let installer: UpdateInstaller | undefined;
 const ptys = spawnPty
   ? new PtyManager({
       spawn: spawnPty,
+      canStart: () => !installer?.busy,
       claudeBin: claudeBin ?? 'claude',
       accounts: () => accounts.entries().map((a) => ({ id: a.id, dir: a.dir, isDefault: isDefaultDir(a.dir, config.home) })),
       agent: (id) => {
@@ -266,6 +269,11 @@ const ptys = spawnPty
   : undefined;
 late.ptys = ptys;
 late.ptyOff = ptyOff;
+installer = new UpdateInstaller({
+  dataDir: config.dataDir, rootDir: config.rootDir, version: config.version, repo: config.repo, port: config.port,
+  enabled: config.terminal && !config.dev && !config.inDocker,
+  hasSessions: () => ptys?.hasLiveOrPending() ?? false,
+});
 
 if (config.demo) office.setDemo(true);
 // As fontes síncronas (a do Claude Code) terminam o boot aqui, antes de o hub começar a transmitir.
@@ -325,6 +333,7 @@ const api = createApiHandler({
   codexLive,
   stats,
   updates,
+  installer,
   remote: config.remote ? { is: isRemoteRequest, allows: (f) => config.remote!.allow.has(f) } : undefined,
 });
 

@@ -95,6 +95,22 @@ async function rejects(p: Promise<unknown>, status: number): Promise<PtyError> {
 }
 
 describe('PtyManager: conferir o processo antes de encerrar', () => {
+  it('blocks create/takeover during updates without touching external sessions', async () => {
+    const s = setup({ canStart: () => false });
+    expect(() => s.manager.create({ cwd: tmpdir() })).toThrow('atualização');
+    await rejects(s.manager.takeover(`acc:${PID}`), 409);
+    expect(s.spawned).toHaveLength(0);
+    expect(s.killPid).not.toHaveBeenCalled();
+    expect(s.manager.hasLiveOrPending()).toBe(false);
+  });
+
+  it('counts a takeover before its asynchronous process checks complete', async () => {
+    const s = setup();
+    const pending = s.manager.takeover(`acc:${PID}`);
+    expect(s.manager.hasLiveOrPending()).toBe(true);
+    await pending;
+    expect(s.manager.hasLiveOrPending()).toBe(true);
+  });
   it('encerra quando registro, início e executável batem', async () => {
     const s = setup();
     await s.manager.stop(`acc:${PID}`);

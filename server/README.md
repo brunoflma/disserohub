@@ -10,6 +10,8 @@ npm run build && npm start   # produção: serve dist/client
 
 ## Fontes de dados (somente leitura)
 
+O instalador local usa `GET /api/updates/install` para disponibilidade e progresso e `POST /api/updates/install` com `{ "version": "1.0.3.4" }` para instalar exatamente a versão exibida. Escritas exigem socket/Host locais, Origin obrigatório idêntico à página e JSON limitado a 1 KiB; a porta remota não instala. Só o serviço nativo Windows gerenciado aceita instalação. O launcher estável preserva uma versão anterior e usa decisão exclusiva de commit/rollback; os candidatos mantêm código e dependências próprios em `<dataDir>/releases`. O diretório de dados não é substituído. Compatibilidade exige `disserohub.updateProtocol: 1` e o mesmo `dataSchema`. O instalador bloqueia novos PTYs e tomadas de sessão durante toda a troca e recusa iniciar enquanto houver PTYs ou tomadas pendentes.
+
 | O quê | Onde |
 | --- | --- |
 | Sessões abertas e status (ocupado/ocioso/esperando) | `<config>/sessions/<pid>.json` (+ PID vivo, fora do Docker) |
