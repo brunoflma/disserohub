@@ -17,6 +17,9 @@ import { TerminalStreams } from './http/terminal';
 import { createTimelineHandler } from './http/timeline';
 import { TIMELINE_DIR, TimelineRecorder } from './history/timeline';
 import { DayStatsService } from './history/daystats';
+import { WellbeingService } from './wellbeing/service';
+import { WindowsFocusMonitor } from './wellbeing/windows-focus';
+import { createWellbeingRoutes } from './wellbeing/http';
 import { describeStateMigration, legacyEnvWarning, migrateLegacyStateDir } from './legacy';
 import { errMsg, log } from './log';
 import { NameStore } from './model/names';
@@ -138,6 +141,24 @@ const hub = new Hub(office, {
 // "Meu dia": amostra o escritório a cada segundo e persiste em <dataDir>/stats/ (ver history/daystats.ts).
 const stats = new DayStatsService({ dir: join(config.dataDir, 'stats'), snapshot: () => hub.current() });
 stats.load();
+let desktopFocus = new WindowsFocusMonitor({ disabled: !config.terminal || config.inDocker });
+let desktopTracking = false;
+function setDesktopTracking(enabled: boolean): void {
+  if (enabled === desktopTracking) return;
+  desktopTracking = enabled;
+  if (enabled) {
+    // An explicit off/on starts a fresh helper; ordinary preference changes never restart a failed one.
+    desktopFocus = new WindowsFocusMonitor({ disabled: !config.terminal || config.inDocker });
+    desktopFocus.start();
+  } else desktopFocus.stop();
+}
+const wellbeing = config.terminal && !config.inDocker ? new WellbeingService({
+  file: join(config.dataDir, 'wellbeing.json'),
+  agentsActive: () => hub.current().agents.some((agent) => !isDemoId(agent.id) && (agent.status === 'working' || agent.status === 'shell')),
+  desktop: () => desktopFocus.snapshot(),
+  onPreferences: (preferences) => setDesktopTracking(preferences.trackingEnabled),
+}) : undefined;
+wellbeing?.load();
 // Terminal: só existe com bind local (ver terminalOffReason em config.ts).
 // Cada agente com o parser da ferramenta dele (o do Claude Code por padrão).
 const terminals = config.terminal
@@ -287,6 +308,8 @@ if (timeline) {
 permissions?.start();
 messages?.start();
 stats.start();
+wellbeing?.start();
+setDesktopTracking(wellbeing?.snapshot(Intl.DateTimeFormat().resolvedOptions().timeZone).preferences.trackingEnabled ?? false);
 updates.start();
 const ticker = setInterval(() => {
   try {
@@ -332,6 +355,7 @@ const api = createApiHandler({
   },
   codexLive,
   stats,
+  wellbeing: wellbeing ? createWellbeingRoutes(wellbeing) : undefined,
   updates,
   installer,
   remote: config.remote ? { is: isRemoteRequest, allows: (f) => config.remote!.allow.has(f) } : undefined,
@@ -505,6 +529,8 @@ function shutdown(signal: string): void {
   log.info(tr('Encerrando ({0})…', [signal]));
   clearInterval(ticker);
   stats.stop();
+  wellbeing?.stop();
+  desktopFocus.stop();
   agents.stop();
   accounts.stop();
   hub.stop();

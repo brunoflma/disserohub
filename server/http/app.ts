@@ -29,6 +29,7 @@ import { installRoute } from '../updates/http';
 import type { UpdateInstaller } from '../updates/installer';
 
 export interface ApiDeps {
+  wellbeing?: (req: IncomingMessage, res: ServerResponse, url: URL, remote: boolean) => boolean;
   installer?: UpdateInstaller;
   office: Office;
   hub: Hub;
@@ -347,6 +348,12 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
     if (path !== '/api' && !path.startsWith('/api/')) return false;
     const method = req.method ?? 'GET';
     const isRead = method === 'GET' || method === 'HEAD';
+
+    if (path === '/api/wellbeing' || path.startsWith('/api/wellbeing/')) {
+      if (!deps.wellbeing) sendJson(res, 403, { error: 'O acompanhamento pessoal está disponível apenas no serviço local do Dissero.' });
+      else deps.wellbeing(req, res, url, isRemote(req));
+      return true;
+    }
 
     if (isRemote(req) && isLocalOnlyPath(path)) {
       req.resume();

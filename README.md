@@ -23,6 +23,16 @@ O servidor local escuta em `127.0.0.1:4747` por padrão. A configuração de HTT
 
 Os identificadores internos `habblaud`, as variáveis `HABBLAUD_*` e o diretório de dados `~/.habblaud` são mantidos por compatibilidade com instalações existentes.
 
+## Ritmo de uso
+
+O ícone de gráfico com relógio, ao lado de **Meu dia**, abre o acompanhamento por dia, semana e mês. **Seu tempo ativo** e **Agentes em atividade** são medidos separadamente; agentes simultâneos contam uma única vez no segundo indicador.
+
+No Windows, o tempo pessoal considera Dissero, Codex, ChatGPT e Claude Desktop em foco e com interação nos últimos dois minutos. Outros sites e terminais não são incluídos automaticamente. Nos demais sistemas, a observação pessoal se limita ao Dissero em foco. Não são capturados textos, teclas, títulos de janela ou URLs. As amostras registram somente intervalos de tempo e ficam neste computador, disponíveis apenas pela conexão local.
+
+Os lembretes usam somente o tempo pessoal. É possível configurar o intervalo de uso contínuo, a duração das pausas e o limite diário, adiar um aviso ou desativar os lembretes e o acompanhamento pessoal. Uma pausa com duração definida encerra automaticamente. Os padrões de 50 minutos, pausa de cinco minutos e limite diário de quatro horas são preferências iniciais ajustáveis.
+
+O histórico começa quando o recurso é ativado, conserva até 93 dias e indica períodos sem observação como **sem dados**. Tempo com o servidor desligado não é reconstruído a partir das conversas. O painel distingue falta de cobertura pessoal de atividade real dos agentes e informa quando não consegue salvar os dados recentes.
+
 ## Atualizações
 
 Em **Configurações → Sobre**, **Verificar agora** consulta versões e **Atualizar para v…** instala a versão estável mais recente. O instalador está disponível no serviço nativo Windows preparado com o launcher de atualização. A ação exige abrir a página no próprio computador e encerrar os terminais criados pelo Dissero. As consultas e instalações usam exclusivamente `brunoflma/disserohub`.
