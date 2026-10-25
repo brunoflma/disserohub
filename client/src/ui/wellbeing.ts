@@ -28,6 +28,8 @@ export class WellbeingPanel implements UiComponent {
   private notifiedId?: string;
   private claiming = false;
   private settingsExpanded = false;
+  private renderedPeriod: WellbeingPeriod = 'day';
+  private readonly historyScroll: Record<WellbeingPeriod, number> = { day: 0, week: 0, month: 0 };
   private readonly content: HTMLElement;
   private readonly heading: HTMLHeadingElement;
   private readonly tabs = new Map<WellbeingPeriod, HTMLButtonElement>();
@@ -156,6 +158,9 @@ export class WellbeingPanel implements UiComponent {
     if (viewKey === this.lastView) return;
     this.lastView = viewKey;
     const focusControl = this.content.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.rhythmControl : undefined;
+    const oldHistory = this.content.querySelector<HTMLElement>('.ui-rhythm__history ul');
+    if (oldHistory) this.historyScroll[this.renderedPeriod] = oldHistory.scrollTop;
+    this.renderedPeriod = this.period;
     this.content.replaceChildren();
     if (this.ctx.store.mock) { this.content.append(h('p', { text: 'O acompanhamento pessoal fica desativado na demonstração. Dados simulados não entram no seu histórico.' })); return; }
     if (this.failure) this.content.append(h('div', { class: 'ui-rhythm__error', role: 'status' }, h('p', { text: this.failure }), h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: 'Tentar novamente', on: { click: () => void this.refresh() } })));
@@ -183,6 +188,8 @@ export class WellbeingPanel implements UiComponent {
     this.content.append(h('p', { class: 'ui-rhythm__coverage', text: `Coleta iniciada em ${since}. Períodos sem observação ficam sem dados; o histórico não é preenchido retroativamente.` }),
       h('p', { class: 'ui-rhythm__coverage', text: r.desktopSupported ? 'Seu tempo considera Dissero e Codex, ChatGPT ou Claude Desktop em foco, com interação nos últimos 2 minutos. Outros sites e terminais não são incluídos automaticamente. Nenhum texto digitado ou título de janela é registrado.' : 'Neste sistema, seu tempo considera apenas o Dissero em foco, com interação nos últimos 2 minutos. O tempo nos outros aplicativos não é medido.' }));
     if (focusControl) this.content.querySelector<HTMLElement>(`[data-rhythm-control="${focusControl}"]`)?.focus({ preventScroll: true });
+    const nextHistory = this.content.querySelector<HTMLElement>('.ui-rhythm__history ul');
+    if (nextHistory) nextHistory.scrollTop = this.historyScroll[this.period];
   }
 
   private range(start: number, end: number): string {
@@ -194,7 +201,7 @@ export class WellbeingPanel implements UiComponent {
     const section = h('section', { class: 'ui-rhythm__history', attrs: { 'aria-label': 'Histórico diário de uso' } }, h('h3', { text: 'Ao longo dos dias' }), h('p', { class: 'ui-rhythm__legend', text: 'Seu tempo ativo / agentes em atividade' }));
     if (!days.some((day) => day.coverageMs > 0)) { section.append(h('p', { text: 'Ainda sem dados neste período. O tempo aparecerá à medida que o Dissero acompanhar a atividade.' })); return section; }
     const max = Math.max(...days.map((day) => Math.max(day.personalMs, day.agentMs)), 60_000);
-    const list = h('ul');
+    const list = h('ul', { tabIndex: 0, attrs: { 'aria-label': 'Histórico diário por data', 'data-rhythm-control': 'history' } });
     for (const day of days) {
       const label = day.day.slice(8) + '/' + day.day.slice(5, 7);
       const item = h('li', {}, h('time', { text: label, attrs: { datetime: day.day } }));

@@ -6,8 +6,8 @@ A partir da 1.0.3, o número de uma release do DisseroHub acompanha o número da
 
 | Identificação | Onde fica | Significado nesta versão |
 | --- | --- | --- |
-| Versão pública do DisseroHub | `distributionVersion(package.json)` | 1.0.3.5 (candidato local) |
-| Revisão própria | `disserohub.revision` | 5 |
+| Versão pública do DisseroHub | `distributionVersion(package.json)` | 1.0.3.6 (candidato local) |
+| Revisão própria | `disserohub.revision` | 6 |
 | Base compatível com npm/plugins | `package.json.version` e manifests locais | 1.0.3 |
 | Referência oficial revisada | `disserohub.upstreamReferenceVersion` e `UPSTREAM_REFERENCE_VERSION` | Habblaud 1.0.3 foi comparado e classificado |
 | Base técnica integrada | `disserohub.upstreamVersion` e `UPSTREAM_BASE_VERSION` | Habblaud 0.11.0, com backports e customizações registrados |

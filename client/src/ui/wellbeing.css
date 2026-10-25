@@ -1,10 +1,10 @@
 .ui-rhythm {
   position: fixed;
   z-index: 42;
-  top: 88px;
+  top: calc(var(--top-h, 80px) + 8px);
   right: 16px;
   width: min(540px, calc(100vw - 32px));
-  max-height: calc(100dvh - 110px);
+  max-height: calc(100dvh - var(--top-h, 80px) - 20px);
   overflow: auto;
   background: #151b24;
   color: var(--ui-text, #e5e9ef);
@@ -67,7 +67,7 @@
 .ui-rhythm :focus-visible, .ui-rhythm-notice :focus-visible { outline: 2px solid #a0e6c5; outline-offset: 3px; }
 .ui-rhythm ::selection { background: #91dfbb; color: #10221a; }
 @media (max-width: 600px) {
-  .ui-rhythm { top: 80px; right: 8px; width: calc(100vw - 16px); max-height: calc(100dvh - 92px); padding: 16px; }
+  .ui-rhythm { top: calc(var(--top-h, 80px) + 8px); right: 8px; width: calc(100vw - 16px); max-height: calc(100dvh - var(--top-h, 80px) - 20px); padding: 16px; }
   .ui-rhythm__head { top: -16px; margin: -16px -16px 0; padding: 16px 16px 10px; }
   .ui-rhythm__totals dd { font-size: 20px; }
   .ui-rhythm__history li { grid-template-columns: 40px minmax(24px, 1fr) minmax(100px, auto); gap: 7px; }
