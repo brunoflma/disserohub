@@ -23,6 +23,7 @@ vi.mock('./toasts');
 vi.mock('./version');
 vi.mock('./update');
 vi.mock('./viewport');
+vi.mock('./wellbeing');
 vi.mock('../local/camera-tools');
 vi.mock('../local/panel-resizer', () => ({ panelResizer: () => () => {} }));
 vi.mock('./topbar', () => ({ TopBar: class {
