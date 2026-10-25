@@ -107,6 +107,32 @@ describe('WellbeingService edge regressions', () => {
     expect(report.periods.day.personalCoverageMs).toBe(15 * SECOND);
   });
 
+  it('starts a new block after an unobserved short restart without losing personal totals', () => {
+    const temp = tempDir('wellbeing-short-restart-');
+    temps.push(temp);
+    const file = join(temp.dir, 'wellbeing.json');
+    const h = setup(T0, file);
+    h.focus.active = true;
+    h.sample(T0);
+    for (let i = 1; i <= 16 * MINUTE / WELLBEING_SAMPLE_MS; i++) {
+      h.sample(T0 + i * WELLBEING_SAMPLE_MS);
+    }
+    h.service.stop();
+
+    const restartedAt = T0 + 17 * MINUTE;
+    const restarted = setup(restartedAt, file);
+    restarted.focus.active = true;
+    restarted.sample(restartedAt);
+    for (let i = 1; i <= 3 * MINUTE / WELLBEING_SAMPLE_MS; i++) {
+      restarted.sample(restartedAt + i * WELLBEING_SAMPLE_MS);
+    }
+
+    const report = restarted.service.snapshot('UTC');
+    expect(report.periods.day.personalMs).toBe(19 * MINUTE);
+    expect(report.current.continuousMs).toBe(3 * MINUTE);
+    expect(report.periods.day.longestBlockMs).toBe(16 * MINUTE);
+  });
+
   it('closes the personal interval at the focus-change sample while agent time continues', () => {
     const h = setup();
     h.focus.active = true;

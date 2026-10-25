@@ -556,7 +556,7 @@ export class WellbeingService {
   private addContinuous(start: number, end: number): void {
     if (end <= start) return;
     const resetGap = this.preferences.breakMinutes * MS_PER_MINUTE;
-    if (this.lastPersonalAt === null || start - this.lastPersonalAt >= resetGap) {
+    if (this.lastPersonalAt === null || start - this.lastPersonalAt >= resetGap || !coveredGap(this.personalCoverage, this.lastPersonalAt, start)) {
       this.continuousMs = 0;
       this.continuousStartAt = start;
     }
