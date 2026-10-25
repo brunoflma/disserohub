@@ -10,6 +10,8 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+## [1.0.3.8] - 2026-10-25
+
 ### Ritmo de uso
 
 - Novo botão ao lado de Meu dia com tempos separados de interação pessoal e atividade dos agentes, por dia, semana e mês.
