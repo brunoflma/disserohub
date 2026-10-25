@@ -1,23 +1,23 @@
-.ui-rhythm {
+.ui-dialog.ui-rhythm {
   position: fixed;
-  z-index: 42;
-  top: calc(var(--top-h, 80px) + 8px);
-  right: 16px;
-  width: min(540px, calc(100vw - 32px));
-  max-height: calc(100dvh - var(--top-h, 80px) - 20px);
-  overflow: auto;
+  inset: 0;
+  margin: auto;
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(92dvh, 980px);
+  overflow: hidden;
   background: #151b24;
   color: var(--ui-text, #e5e9ef);
   border: 1px solid #465260;
   border-radius: 10px;
   box-shadow: 0 14px 38px #0006;
-  padding: 20px;
+  padding: 0;
   font-size: 14px;
   line-height: 1.5;
   scrollbar-color: #647282 #202833;
 }
-.ui-rhythm[hidden], .ui-rhythm-notice[hidden] { display: none; }
-.ui-rhythm__head { position: sticky; top: -20px; z-index: 2; display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; margin: -20px -20px 0; padding: 20px 20px 10px; background: #151b24; }
+.ui-rhythm-notice[hidden] { display: none; }
+.ui-rhythm__head { display: flex; flex: 0 0 auto; gap: 16px; align-items: flex-start; justify-content: space-between; padding: 22px 24px 16px; background: #151b24; }
+.ui-rhythm__body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 24px 24px; }
 .ui-rhythm h2 { margin: 0; font-size: 22px; line-height: 1.25; }
 .ui-rhythm h3 { margin: 0 0 8px; font-size: 15px; }
 .ui-rhythm__head .ui-icon-btn { flex: 0 0 auto; }
@@ -45,31 +45,37 @@
 .ui-rhythm__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .ui-rhythm__history { margin-top: 24px; }
 .ui-rhythm__legend { margin: 0 0 8px; font-size: 12px; }
-.ui-rhythm__history ul { padding: 0; margin: 0; list-style: none; max-height: 260px; overflow: auto; }
-.ui-rhythm__history li { display: grid; grid-template-columns: 42px minmax(36px, 1fr) minmax(110px, auto); gap: 10px; align-items: center; padding: 8px 0; font-size: 12px; border-bottom: 1px solid #323d48; font-variant-numeric: tabular-nums; }
-.ui-rhythm__bars { display: flex; flex-direction: column; gap: 3px; }
-.ui-rhythm__bars span { display: block; height: 5px; min-width: 0; border-radius: 2px; }
+.ui-rhythm__history ul { padding: 0; margin: 0; list-style: none; max-height: 300px; overflow: auto; overscroll-behavior: contain; }
+.ui-rhythm__history li { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; align-items: start; padding: 12px 0; font-size: 13px; border-bottom: 1px solid #323d48; font-variant-numeric: tabular-nums; }
+.ui-rhythm__date { padding-top: 1px; color: #d7e0e9; }
+.ui-rhythm__series { display: grid; gap: 8px; min-width: 0; }
+.ui-rhythm__series-row { display: grid; grid-template-columns: 62px minmax(24px, 1fr) 105px; gap: 12px; align-items: center; }
+.ui-rhythm__track { display: block; min-width: 0; }
+.ui-rhythm__track > span { display: block; height: 6px; min-width: 0; border-radius: 2px; }
 .ui-rhythm__bar-personal { background: #91dfbb; }
 .ui-rhythm__bar-agent { background: #95c8f4; }
 .ui-rhythm__values { text-align: right; color: #d7e0e9; }
-.ui-rhythm__missing { grid-column: 2 / 4; color: #aebdcb; }
+.ui-rhythm__missing { color: #aebdcb; }
 .ui-rhythm__settings { margin: 24px 0 18px; padding-top: 14px; border-top: 1px solid #465260; }
 .ui-rhythm__settings summary { cursor: pointer; font-weight: 600; margin-bottom: 12px; }
 .ui-rhythm__check { display: flex; gap: 9px; align-items: center; margin: 12px 0; cursor: pointer; }
 .ui-rhythm__check input { accent-color: #82d6ad; width: 16px; height: 16px; }
 .ui-rhythm__field { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; }
 .ui-rhythm select { font: inherit; color: #e5e9ef; background: #202a35; border: 1px solid #647282; border-radius: 5px; padding: 6px 8px; }
-.ui-rhythm__coverage { font-size: 11px; line-height: 1.55; margin: 10px 0 0; }
+.ui-rhythm__coverage { max-width: 76ch; font-size: 12px; line-height: 1.55; margin: 10px 0 0; }
 .ui-rhythm__error { padding-bottom: 14px; color: #f2c9b5; }
 .ui-rhythm-notice { position: fixed; z-index: 44; right: 18px; bottom: 20px; max-width: min(390px, calc(100vw - 36px)); padding: 18px; background: #23382f; color: #edf8f1; border: 1px solid #80ad96; border-radius: 9px; box-shadow: 0 8px 26px #0005; }
 .ui-rhythm-notice p { margin: 7px 0 12px; font-size: 14px; line-height: 1.5; }
 .ui-icon-btn.is-rhythm-due { color: #91dfbb; background: #284538; }
 .ui-rhythm :focus-visible, .ui-rhythm-notice :focus-visible { outline: 2px solid #a0e6c5; outline-offset: 3px; }
+.ui-rhythm__head h2:focus-visible { outline: none; }
 .ui-rhythm ::selection { background: #91dfbb; color: #10221a; }
 @media (max-width: 600px) {
-  .ui-rhythm { top: calc(var(--top-h, 80px) + 8px); right: 8px; width: calc(100vw - 16px); max-height: calc(100dvh - var(--top-h, 80px) - 20px); padding: 16px; }
-  .ui-rhythm__head { top: -16px; margin: -16px -16px 0; padding: 16px 16px 10px; }
+  .ui-dialog.ui-rhythm { width: calc(100vw - 16px); max-height: calc(100dvh - 24px); }
+  .ui-rhythm__head { padding: 18px 16px 14px; }
+  .ui-rhythm__body { padding: 0 16px 18px; }
   .ui-rhythm__totals dd { font-size: 20px; }
-  .ui-rhythm__history li { grid-template-columns: 40px minmax(24px, 1fr) minmax(100px, auto); gap: 7px; }
+  .ui-rhythm__history li { grid-template-columns: 36px minmax(0, 1fr); gap: 10px; font-size: 12px; }
+  .ui-rhythm__series-row { grid-template-columns: 48px minmax(16px, 1fr) 88px; gap: 7px; }
   .ui-rhythm__field { align-items: flex-start; }
 }

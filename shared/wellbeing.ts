@@ -19,9 +19,9 @@ export interface WellbeingPreferences {
 export const DEFAULT_WELLBEING_PREFERENCES: Readonly<WellbeingPreferences> = Object.freeze({
   trackingEnabled: true,
   remindersEnabled: true,
-  breakAfterMinutes: 50,
-  breakMinutes: 5,
-  dailyLimitMinutes: 240,
+  breakAfterMinutes: 120,
+  breakMinutes: 15,
+  dailyLimitMinutes: 480,
 });
 
 export type WellbeingPeriodName = 'day' | 'week' | 'month';

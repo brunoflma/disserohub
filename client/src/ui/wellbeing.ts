@@ -6,16 +6,15 @@ import { lineIcon } from './icons';
 import { activityRecent, chartWidth, PERIOD_LABELS, wellbeingDuration, type WellbeingPeriod } from './wellbeing-model';
 import './wellbeing.css';
 
-// Same stroke and plotting motif as Meu dia, with a small clock to identify personal time.
-const RHYTHM_ICON = lineIcon('<path d="M3 19V9m6 10V4m6 5V6M1 20h10"/><circle cx="17" cy="16" r="5"/><path d="M17 13v3l2 1"/>');
-/** Nonmodal companion to Meu dia. No content, keys or window titles are recorded. */
+// A heart with a pause symbol distinguishes personal wellbeing from Meu dia's chart.
+const RHYTHM_ICON = lineIcon('<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/><path d="M10 9v6m4-6v6"/>');
+/** Personal wellbeing dialog. No content, keys or window titles are recorded. */
 export class WellbeingPanel implements UiComponent {
   readonly button: HTMLButtonElement;
-  readonly el: HTMLElement;
+  readonly el: HTMLDialogElement;
   readonly reminderEl: HTMLElement;
   private readonly client = new WellbeingClient();
   private report?: WellbeingReport;
-  private opened = false;
   private period: WellbeingPeriod = 'day';
   private loading = false;
   private saving = false;
@@ -40,7 +39,8 @@ export class WellbeingPanel implements UiComponent {
     this.button = iconButton(RHYTHM_ICON, 'Ritmo de uso: seu tempo, atividade dos agentes e pausas', () => this.toggle());
     setAttr(this.button, 'aria-expanded', 'false');
     setAttr(this.button, 'aria-controls', 'ui-wellbeing');
-    this.heading = h('h2', { text: 'Ritmo de uso', tabIndex: -1 });
+    setAttr(this.button, 'aria-haspopup', 'dialog');
+    this.heading = h('h2', { text: 'Ritmo de uso', tabIndex: -1, attrs: { id: 'ui-rhythm-title' } });
     const close = iconButton(lineIcon('<path d="m6 6 12 12M18 6 6 18"/>'), 'Fechar acompanhamento', () => this.close());
     const tabs = h('div', { class: 'ui-rhythm__periods', role: 'group', attrs: { 'aria-label': 'Período do acompanhamento' } });
     for (const period of ['day', 'week', 'month'] as const) {
@@ -48,8 +48,20 @@ export class WellbeingPanel implements UiComponent {
       this.tabs.set(period, tab); tabs.append(tab);
     }
     this.content = h('div', { class: 'ui-rhythm__content' });
-    this.el = h('section', { class: 'ui-rhythm', hidden: true, attrs: { id: 'ui-wellbeing', 'aria-label': 'Ritmo de uso' }, on: { keydown: (event) => { if (event.key === 'Escape') { event.stopPropagation(); this.close(); } } } },
-      h('header', { class: 'ui-rhythm__head' }, h('div', {}, this.heading, h('p', { class: 'ui-rhythm__intro', text: 'Seu tempo e o trabalho dos agentes, separados.' })), close), tabs, this.content);
+    this.el = h('dialog', { class: 'ui-dialog ui-rhythm', attrs: { id: 'ui-wellbeing', 'aria-labelledby': 'ui-rhythm-title', 'aria-describedby': 'ui-rhythm-intro' } },
+      h('header', { class: 'ui-dialog__head ui-rhythm__head' }, h('div', {}, this.heading, h('p', { class: 'ui-rhythm__intro', text: 'Seu tempo e o trabalho dos agentes, separados.', attrs: { id: 'ui-rhythm-intro' } })), close),
+      h('div', { class: 'ui-rhythm__body' }, tabs, this.content));
+    this.el.addEventListener('keydown', (event) => event.stopPropagation());
+    this.el.addEventListener('click', (event) => {
+      if (event.target !== this.el) return;
+      const bounds = this.el.getBoundingClientRect();
+      if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) this.close();
+    });
+    this.el.addEventListener('close', () => {
+      if (this.el.open) return;
+      setAttr(this.button, 'aria-expanded', 'false');
+      this.button.focus();
+    });
     this.noticeTitle = h('strong');
     this.noticeText = h('p');
     this.reminderEl = h('section', { class: 'ui-rhythm-notice', hidden: true, role: 'status', attrs: { 'aria-label': 'Lembrete de pausa', 'aria-live': 'polite' } },
@@ -65,9 +77,6 @@ export class WellbeingPanel implements UiComponent {
     document.addEventListener('visibilitychange', () => { void this.pulse(); if (!document.hidden) void this.refresh(); });
     window.addEventListener('pagehide', () => {
       if (!this.ctx.store.mock) void fetch('/api/wellbeing/pulse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: false, clientId: this.client.clientId }), keepalive: true }).catch(() => {});
-    });
-    document.addEventListener('pointerdown', (event) => {
-      if (this.opened && event.target instanceof Node && !this.el.contains(event.target) && !this.button.contains(event.target)) this.close(false);
     });
     let timer = window.setInterval(() => this.tick(), 5_000);
     window.addEventListener('pagehide', () => window.clearInterval(timer));
@@ -103,15 +112,15 @@ export class WellbeingPanel implements UiComponent {
     catch (error) { this.failure = error instanceof Error ? error.message : 'Acompanhamento indisponível. Tente novamente.'; }
     finally { this.loading = false; this.ctx.invalidate(); }
   }
-  private toggle(): void { this.opened ? this.close() : this.open(); }
+  private toggle(): void { this.el.open ? this.close() : this.open(); }
   private open(): void {
-    this.opened = true; setHidden(this.el, false); setAttr(this.button, 'aria-expanded', 'true');
+    if (this.el.open) return;
+    this.el.showModal(); setAttr(this.button, 'aria-expanded', 'true');
     this.lastView = ''; this.render(); this.heading.focus();
     if (!this.ctx.store.mock) void this.refresh();
   }
-  private close(restoreFocus = true): void {
-    this.opened = false; setHidden(this.el, true); setAttr(this.button, 'aria-expanded', 'false');
-    if (restoreFocus) this.button.focus();
+  private close(): void {
+    if (this.el.open) this.el.close();
   }
   private async act(action: WellbeingAction): Promise<void> {
     if (this.saving) return;
@@ -150,7 +159,7 @@ export class WellbeingPanel implements UiComponent {
       setText(this.noticeTitle, reminder.kind === 'break' ? 'Que tal uma pausa?' : 'Seu limite de hoje foi atingido');
       setText(this.noticeText, reminder.kind === 'break' ? 'Você chegou ao intervalo de uso ativo que configurou. Descanse um pouco antes de continuar.' : 'Considere encerrar por agora ou planejar uma pausa mais longa.');
     }
-    if (!this.opened) return;
+    if (!this.el.open) return;
     // Keep a native select open while new samples arrive; update after focus leaves it.
     if (document.activeElement instanceof HTMLSelectElement && this.content.contains(document.activeElement)) return;
     for (const [period, button] of this.tabs) setAttr(button, 'aria-pressed', String(this.period === period));
@@ -198,18 +207,26 @@ export class WellbeingPanel implements UiComponent {
   }
   private chart(): HTMLElement {
     const days = this.report!.periods[this.period].days;
-    const section = h('section', { class: 'ui-rhythm__history', attrs: { 'aria-label': 'Histórico diário de uso' } }, h('h3', { text: 'Ao longo dos dias' }), h('p', { class: 'ui-rhythm__legend', text: 'Seu tempo ativo / agentes em atividade' }));
+    const section = h('section', { class: 'ui-rhythm__history', attrs: { 'aria-label': 'Histórico diário de uso' } }, h('h3', { text: 'Histórico diário' }), h('p', { class: 'ui-rhythm__legend', text: 'Cada dia mostra seu tempo de interação e o tempo em que havia agentes trabalhando.' }));
     if (!days.some((day) => day.coverageMs > 0)) { section.append(h('p', { text: 'Ainda sem dados neste período. O tempo aparecerá à medida que o Dissero acompanhar a atividade.' })); return section; }
     const max = Math.max(...days.map((day) => Math.max(day.personalMs, day.agentMs)), 60_000);
     const list = h('ul', { tabIndex: 0, attrs: { 'aria-label': 'Histórico diário por data', 'data-rhythm-control': 'history' } });
     for (const day of days) {
       const label = day.day.slice(8) + '/' + day.day.slice(5, 7);
-      const item = h('li', {}, h('time', { text: label, attrs: { datetime: day.day } }));
-      if (!day.coverageMs) item.append(h('span', { class: 'ui-rhythm__missing', text: 'Sem dados' }));
+      const item = h('li', {}, h('time', { class: 'ui-rhythm__date', text: label, attrs: { datetime: day.day } }));
+      if (!day.coverageMs) item.append(h('span', { class: 'ui-rhythm__missing', text: 'Sem dados neste dia' }));
       else {
-        const bars = h('div', { class: 'ui-rhythm__bars', attrs: { 'aria-hidden': 'true' } });
-        bars.append(h('span', { class: 'ui-rhythm__bar-personal', style: `width:${chartWidth(day.personalMs, max)}` }), h('span', { class: 'ui-rhythm__bar-agent', style: `width:${chartWidth(day.agentMs, max)}` }));
-        item.append(bars, h('span', { class: 'ui-rhythm__values', text: `${day.personalCoverageMs > 0 ? wellbeingDuration(day.personalMs) : 'sem dados'} / ${wellbeingDuration(day.agentMs)}` }));
+        const series = h('div', { class: 'ui-rhythm__series' });
+        for (const [name, kind, value, observed] of [
+          ['Você', 'personal', day.personalMs, day.personalCoverageMs > 0],
+          ['Agentes', 'agent', day.agentMs, true],
+        ] as const) {
+          series.append(h('div', { class: 'ui-rhythm__series-row' },
+            h('span', { class: `ui-rhythm__${kind}`, text: name }),
+            h('span', { class: 'ui-rhythm__track', attrs: { 'aria-hidden': 'true' } }, h('span', { class: `ui-rhythm__bar-${kind}`, style: `width:${chartWidth(observed ? value : 0, max)}` })),
+            h('span', { class: 'ui-rhythm__values', text: observed ? wellbeingDuration(value) : 'Sem dados' })));
+        }
+        item.append(series);
       }
       list.append(item);
     }
@@ -231,7 +248,7 @@ export class WellbeingPanel implements UiComponent {
       control.disabled = this.saving;
       return h('label', { class: 'ui-rhythm__field' }, h('span', { text: label }), control);
     };
-    details.append(select('breakAfterMinutes', 'Lembrar após uso contínuo de', [25, 50, 90]), select('breakMinutes', 'Duração da pausa', [5, 10, 15]), select('dailyLimitMinutes', 'Limite pessoal por dia', [120, 240, 360, 480]), h('p', { class: 'ui-rhythm__hint', text: 'Os alertas usam somente o seu tempo ativo. As preferências são salvas neste computador.' }));
+    details.append(select('breakAfterMinutes', 'Lembrar após uso contínuo de', [25, 50, 90, 120]), select('breakMinutes', 'Duração da pausa', [5, 10, 15]), select('dailyLimitMinutes', 'Limite pessoal por dia', [120, 240, 360, 480]), h('p', { class: 'ui-rhythm__hint', text: 'Os alertas usam somente o seu tempo ativo. As preferências são salvas neste computador.' }));
     return details;
   }
 }

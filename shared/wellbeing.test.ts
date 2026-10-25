@@ -3,13 +3,20 @@ import { DEFAULT_WELLBEING_PREFERENCES, sanitizeWellbeingPreferences, wellbeingP
 
 describe('wellbeing contract', () => {
   it('provides the approved defaults and clamps preference bounds', () => {
+    expect(DEFAULT_WELLBEING_PREFERENCES).toEqual({
+      trackingEnabled: true,
+      remindersEnabled: true,
+      breakAfterMinutes: 120,
+      breakMinutes: 15,
+      dailyLimitMinutes: 480,
+    });
     expect(sanitizeWellbeingPreferences({})).toEqual(DEFAULT_WELLBEING_PREFERENCES);
     expect(
       sanitizeWellbeingPreferences({ trackingEnabled: false, breakAfterMinutes: 3, breakMinutes: 90, dailyLimitMinutes: 900 }),
     ).toMatchObject({ trackingEnabled: false, remindersEnabled: true, breakAfterMinutes: 20, breakMinutes: 30, dailyLimitMinutes: 720 });
     expect(sanitizeWellbeingPreferences({ breakAfterMinutes: 51.6, breakMinutes: Number.NaN, dailyLimitMinutes: 31.2 })).toMatchObject({
       breakAfterMinutes: 52,
-      breakMinutes: 5,
+      breakMinutes: 15,
       dailyLimitMinutes: 31,
     });
   });

@@ -25,11 +25,11 @@ Os identificadores internos `habblaud`, as variáveis `HABBLAUD_*` e o diretóri
 
 ## Ritmo de uso
 
-O ícone de gráfico com relógio, ao lado de **Meu dia**, abre o acompanhamento por dia, semana e mês. **Seu tempo ativo** e **Agentes em atividade** são medidos separadamente; agentes simultâneos contam uma única vez no segundo indicador.
+O ícone de coração com pausa, ao lado de **Meu dia**, abre um modal centralizado com o acompanhamento por dia, semana e mês. **Seu tempo ativo** e **Agentes em atividade** são medidos separadamente; agentes simultâneos contam uma única vez no segundo indicador. O histórico diário identifica cada valor nas linhas **Você** e **Agentes**.
 
 No Windows, o tempo pessoal considera Dissero, Codex, ChatGPT e Claude Desktop em foco e com interação nos últimos dois minutos. Outros sites e terminais não são incluídos automaticamente. Nos demais sistemas, a observação pessoal se limita ao Dissero em foco. Não são capturados textos, teclas, títulos de janela ou URLs. As amostras registram somente intervalos de tempo e ficam neste computador, disponíveis apenas pela conexão local.
 
-Os lembretes usam somente o tempo pessoal. É possível configurar o intervalo de uso contínuo, a duração das pausas e o limite diário, adiar um aviso ou desativar os lembretes e o acompanhamento pessoal. Uma pausa com duração definida encerra automaticamente. Os padrões de 50 minutos, pausa de cinco minutos e limite diário de quatro horas são preferências iniciais ajustáveis.
+Os lembretes usam somente o tempo pessoal. É possível configurar o intervalo de uso contínuo, a duração das pausas e o limite diário, adiar um aviso ou desativar os lembretes e o acompanhamento pessoal. Uma pausa com duração definida encerra automaticamente. Os padrões de 120 minutos, pausa de 15 minutos e limite diário de oito horas são preferências iniciais ajustáveis.
 
 O histórico começa quando o recurso é ativado, conserva até 93 dias e indica períodos sem observação como **sem dados**. Tempo com o servidor desligado não é reconstruído a partir das conversas. O painel distingue falta de cobertura pessoal de atividade real dos agentes e informa quando não consegue salvar os dados recentes.
 

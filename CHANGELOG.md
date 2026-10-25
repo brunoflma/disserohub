@@ -13,6 +13,8 @@ do meio (0.**3**.0).
 ### Ritmo de uso
 
 - Novo botão ao lado de Meu dia com tempos separados de interação pessoal e atividade dos agentes, por dia, semana e mês.
+- Ícone de coração com pausa, modal centralizado e histórico diário com linhas identificadas para você e os agentes.
+- Padrões de lembrete após 120 minutos, pausa de 15 minutos e limite pessoal diário de oito horas.
 - Bloco contínuo, maior bloco, pausas registradas e limite diário, com lembretes configuráveis, pausa temporizada e opção de adiar.
 - Observação local de aplicativos de IA compatíveis em foco no Windows, sem capturar conteúdo digitado, títulos de janela ou URLs.
 - Histórico com cobertura explícita, sem preenchimento retroativo, protegido no acesso local; aviso para falhas de persistência.

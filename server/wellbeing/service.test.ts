@@ -85,6 +85,7 @@ describe('WellbeingService', () => {
 
   it('counts no idle time, caps missed samples, and resets continuous time after the configured gap', () => {
     const h = setup();
+    h.service.configure({ breakMinutes: 5 }, 'UTC');
     h.focus.active = true;
     h.sample(T0);
     for (let i = 1; i <= 4; i++) h.sample(T0 + i * 5 * SECOND);
