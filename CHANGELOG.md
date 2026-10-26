@@ -10,6 +10,8 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+## [1.0.3.9] - 2026-10-26
+
 ### Projetos e início de tarefas
 
 - Salas cadastradas manualmente permanecem no escritório quando agentes de outras salas encerram suas sessões.
