@@ -11,6 +11,15 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+/** Remove o cadastro local; não remove a pasta nem interfere nas sessões que ainda a usam. */
+export async function unregisterProject(path: string): Promise<void> {
+  await request<{ removed: boolean }>('/api/projects', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+}
+
 /** Escolha de pastas do computador, sem carregar ou enviar seus arquivos. */
 export class ProjectDialog {
   readonly el: HTMLDialogElement;

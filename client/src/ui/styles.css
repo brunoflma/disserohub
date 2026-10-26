@@ -1565,8 +1565,28 @@
   border: 1px solid var(--ui-line);
 }
 
-.ui-room.is-empty {
+.ui-room.is-empty > .ui-room__head {
   opacity: 0.55;
+}
+
+.ui-room__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 0 6px 5px;
+}
+
+.ui-room__task {
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.ui-room__task:disabled,
+.ui-room__remove:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
 }
 
 .ui-room__head {

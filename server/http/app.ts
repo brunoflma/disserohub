@@ -537,7 +537,16 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           const roomId = deps.office.registerProject(project.path, project.createdAt);
           sendJson(res, 201, { roomId, path: project.path });
         }).catch((err) => sendJson(res, err instanceof HttpError ? err.status : 400, { error: err instanceof HttpError ? err.message : tr('Não foi possível adicionar o projeto. Confira a pasta e a permissão de acesso.') }));
-      } else if (path === '/api/projects') methodNotAllowed(res, 'GET, POST');
+      } else if (path === '/api/projects' && method === 'DELETE') {
+        readJson(req).then(async (body) => {
+          const raw = (body as { path?: unknown } | null)?.path;
+          if (typeof raw !== 'string') return sendJson(res, 400, { error: tr('Escolha uma pasta de projeto.') });
+          const project = await projects.remove(raw);
+          if (!project) return sendJson(res, 404, { error: tr('Projeto não cadastrado.') });
+          deps.office.unregisterProject(project.path);
+          sendJson(res, 200, { removed: true, path: project.path });
+        }).catch((err) => sendJson(res, err instanceof HttpError ? err.status : 400, { error: err instanceof HttpError ? err.message : tr('Não foi possível remover o cadastro do projeto.') }));
+      } else if (path === '/api/projects') methodNotAllowed(res, 'GET, POST, DELETE');
       else sendJson(res, 404, { error: tr('rota não encontrada') });
       return true;
     }

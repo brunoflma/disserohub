@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ago, formatBytes, shortPath, spawnFolders } from './spawn';
+import { ago, canOpenSpawn, formatBytes, shortPath, spawnPanelPosition, spawnFolders } from './spawn';
 import { insertDictation, pickMimeType } from './dictation';
 
 describe('spawnFolders', () => {
@@ -10,14 +10,32 @@ describe('spawnFolders', () => {
       { id: 'demo:x', path: '/demo/x' },
       { id: 'r3', path: 'relativo' },
       { id: 'r4', path: 'C:\\code\\win' },
+      { id: 'r5', path: '/Users/a/empty' },
     ];
     const agents = [
       { roomId: 'r1', lastEventAt: 10 },
       { roomId: 'r2', lastEventAt: 50 },
       { roomId: 'r4', lastEventAt: 20 },
     ];
-    expect(spawnFolders({ rooms, agents } as never)).toEqual(['/Users/a/novo', 'C:\\code\\win', '/Users/a/antigo']);
+    expect(spawnFolders({ rooms, agents } as never)).toEqual(['/Users/a/novo', 'C:\\code\\win', '/Users/a/antigo', '/Users/a/empty']);
     expect(spawnFolders(null)).toEqual([]);
+  });
+
+  it('mantém o formulário visível ao abrir por uma sala à esquerda e perto do rodapé', () => {
+    expect(spawnPanelPosition({ top: 600, right: 260, bottom: 628 }, { width: 420, height: 500 }, { width: 1000, height: 800 })).toEqual({ left: 8, top: 92 });
+    expect(spawnPanelPosition({ top: 20, right: 928, bottom: 48 }, { width: 420, height: 500 }, { width: 960, height: 800 })).toEqual({ left: 508, top: 56 });
+    const small = spawnPanelPosition({ top: 700, right: 360, bottom: 728 }, { width: 358, height: 800 }, { width: 390, height: 844 });
+    expect(small.left).toBeGreaterThanOrEqual(8);
+    expect(small.left + 358).toBeLessThanOrEqual(382);
+    expect(small.top).toBeGreaterThanOrEqual(8);
+    expect(small.top + 800).toBeLessThanOrEqual(836);
+  });
+
+  it('mantém as travas do novo agente para capability, demo e timelapse', () => {
+    expect(canOpenSpawn(true, false, false)).toBe(true);
+    expect(canOpenSpawn(false, false, false)).toBe(false);
+    expect(canOpenSpawn(true, true, false)).toBe(false);
+    expect(canOpenSpawn(true, false, true)).toBe(false);
   });
 });
 

@@ -37,6 +37,24 @@ export interface FolderOption {
   sessions?: number;
 }
 
+export function canOpenSpawn(spawn: boolean, mock: boolean, replaying: boolean): boolean {
+  return spawn && !mock && !replaying;
+}
+
+export function spawnPanelPosition(
+  anchor: { top: number; right: number; bottom: number },
+  panel: { width: number; height: number },
+  viewport: { width: number; height: number },
+): { left: number; top: number } {
+  const margin = 8;
+  const left = Math.max(margin, Math.min(anchor.right - panel.width, viewport.width - panel.width - margin));
+  const below = anchor.bottom + margin;
+  const above = anchor.top - panel.height - margin;
+  const top = below + panel.height <= viewport.height - margin ? below
+    : above >= margin ? above : Math.max(margin, viewport.height - panel.height - margin);
+  return { left, top };
+}
+
 /** Pastas das salas, da mais recente para a mais antiga (reserva quando o servidor não manda a lista). */
 export function spawnFolders(snap: Pick<OfficeSnapshot, 'rooms' | 'agents'> | null | undefined): string[] {
   if (!snap) return [];
@@ -205,6 +223,11 @@ export class SpawnPanel {
       this.anchor?.setAttribute('aria-expanded', String(this.isOpen));
       if (!this.isOpen) this.dictate.cancel();
     });
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => {
+        if (this.isOpen && this.anchor) this.position(this.anchor);
+      }).observe(this.el);
+    }
   }
 
   get isOpen(): boolean {
@@ -215,22 +238,50 @@ export class SpawnPanel {
     }
   }
 
-  toggle(anchor: HTMLElement): void {
+  toggle(anchor: HTMLElement, folderPath?: string): void {
+    if (this.isOpen && folderPath === undefined) {
+      this.hide();
+      anchor.setAttribute('aria-expanded', 'false');
+      return;
+    }
+    if (this.anchor && this.anchor !== anchor) this.anchor.setAttribute('aria-expanded', 'false');
     this.anchor = anchor;
-    if (this.isOpen) return this.hide();
+    if (folderPath !== undefined) {
+      this.selected = folderPath;
+      this.typing = false;
+      setHidden(this.folder, true);
+      this.otherBtn.classList.remove('is-on');
+    }
     // Primeiro com o que o escritório já sabe; a lista do servidor (histórico) chega logo depois.
     if (!this.folders.length) this.setFolders(spawnFolders(this.ctx.store.snapshot).map((path) => ({ path, name: path.split(/[\\/]/).pop() || path, lastAt: 0 })));
+    else if (folderPath !== undefined) this.renderFolders();
+    if (this.isOpen) {
+      this.position(anchor);
+      anchor.setAttribute('aria-expanded', 'true');
+      if (!matchMedia('(pointer: coarse)').matches) this.prompt.focus();
+      return;
+    }
     void this.loadFolders();
     void this.checkDictation();
     if (!this.busy) setText(this.status, '');
-    const r = anchor.getBoundingClientRect();
-    this.el.style.top = `${Math.round(r.bottom + 8)}px`;
-    this.el.style.right = `${Math.max(8, Math.round(innerWidth - r.right - 4))}px`;
     if (typeof this.el.showPopover === 'function') this.el.showPopover();
     else this.el.classList.add('is-open');
+    this.position(anchor);
     anchor.setAttribute('aria-expanded', 'true');
     // No celular, focar o campo abriria o teclado por cima da lista de projetos.
     if (!matchMedia('(pointer: coarse)').matches) this.prompt.focus();
+  }
+
+  openForFolder(anchor: HTMLElement, folderPath: string): void {
+    this.toggle(anchor, folderPath);
+  }
+
+  private position(anchor: HTMLElement): void {
+    const r = anchor.getBoundingClientRect();
+    const at = spawnPanelPosition(r, { width: this.el.offsetWidth, height: this.el.offsetHeight }, { width: innerWidth, height: innerHeight });
+    this.el.style.top = `${Math.round(at.top)}px`;
+    this.el.style.left = `${Math.round(at.left)}px`;
+    this.el.style.right = 'auto';
   }
 
   hide(): void {
@@ -264,7 +315,7 @@ export class SpawnPanel {
 
   private renderFolders(): void {
     const now = Date.now();
-    const known = this.folders.some((f) => f.path === this.selected);
+    const known = this.folders.some((folder) => folder.path === this.selected);
     this.folderList.replaceChildren(
       ...this.folders.map((f) => {
         const on = f.path === this.selected && !this.typing;
@@ -284,7 +335,7 @@ export class SpawnPanel {
         );
       }),
     );
-    if (!this.folders.length) this.showOther(true);
+    if (!this.folders.length) this.showOther(true, this.selected || undefined);
     else if (!known && this.selected && !this.typing) this.showOther(true, this.selected);
   }
 

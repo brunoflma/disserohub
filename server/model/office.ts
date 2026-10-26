@@ -952,7 +952,9 @@ export class Office {
     if (this.effects.prune(now)) this.markDirty();
     if (removed) {
       const occupied = new Set([...this.agents.values()].map((r) => r.info.roomId));
-      for (const id of [...this.rooms.keys()]) if (!occupied.has(id)) this.rooms.delete(id);
+      for (const id of [...this.rooms.keys()]) {
+        if (!occupied.has(id) && !this.registeredRooms.has(id)) this.rooms.delete(id);
+      }
       this.recomputeRoomNames();
       this.markDirty();
     }
@@ -1124,6 +1126,16 @@ export class Office {
     this.registeredRooms.add(id);
     this.markDirty();
     return id;
+  }
+
+  /** Remove apenas o cadastro; agentes presentes continuam ocupando a sala normalmente. */
+  unregisterProject(path: string): boolean {
+    const id = normalizeCwd(path);
+    if (!this.registeredRooms.delete(id)) return false;
+    if (![...this.agents.values()].some((rec) => rec.info.roomId === id)) this.rooms.delete(id);
+    this.recomputeRoomNames();
+    this.markDirty();
+    return true;
   }
 
   private pushFeed(items: FeedItem[]): void {

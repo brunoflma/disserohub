@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { tempDir } from '../test/fixtures';
@@ -116,6 +116,31 @@ describe('ProjectFolders', () => {
       const duplicate = await reloaded.add(duplicateInput);
       expect(duplicate).toEqual(first);
       expect(reloaded.entries()).toEqual([first]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('removes only the registration and persists that removal', async () => {
+    const fixture = tempDir('habblaud-project-folders-');
+    try {
+      const home = join(fixture.dir, 'home');
+      const project = join(home, 'project');
+      const storeFile = join(fixture.dir, 'state', 'projects.json');
+      mkdirSync(project, { recursive: true });
+      writeFileSync(join(project, 'keep.txt'), 'keep me');
+
+      const store = new ProjectFolders(storeFile, home);
+      store.load();
+      const registered = await store.add(project);
+      expect(await store.remove(project)).toEqual(registered);
+      expect(store.entries()).toEqual([]);
+      expect(existsSync(project)).toBe(true);
+      expect(readFileSync(join(project, 'keep.txt'), 'utf8')).toBe('keep me');
+
+      const reloaded = new ProjectFolders(storeFile, home);
+      reloaded.load();
+      expect(reloaded.entries()).toEqual([]);
     } finally {
       fixture.cleanup();
     }

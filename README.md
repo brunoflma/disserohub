@@ -33,6 +33,18 @@ Os lembretes usam somente o tempo pessoal. É possível configurar o intervalo d
 
 O histórico começa quando o recurso é ativado, conserva até 93 dias e indica períodos sem observação como **sem dados**. Tempo com o servidor desligado não é reconstruído a partir das conversas. O painel distingue falta de cobertura pessoal de atividade real dos agentes e informa quando não consegue salvar os dados recentes.
 
+## Projetos e novas tarefas
+
+**Adicionar projeto** cadastra uma pasta como sala persistente. O cadastro continua visível após o encerramento dos agentes e nos próximos reinícios. Em cada sala, **Nova tarefa** abre o formulário do Claude Code com a pasta preenchida. A sessão começa somente ao confirmar o pedido.
+
+O início de sessões exige uma instalação local com `HABBLAUD_PTY=1`, terminal e mensagens habilitados, Claude Code disponível e acesso permitido no próprio computador. A interface informa quando essa capacidade está desligada. O botão de retirar projeto remove somente seu cadastro; os arquivos e as sessões em andamento permanecem no computador.
+
+## Vida no escritório
+
+Durante o expediente, a recepcionista permanece na recepção. Os demais personagens variam os destinos e ficam mais tempo em cada atividade. Visitantes podem ser substituídos depois de saírem e cumprirem um intervalo de retorno. A equipe de apoio também pode visitar espaços livres próximos de agentes trabalhando nas salas.
+
+Esses personagens são locais e ficam fora da contagem, das contas e do histórico de agentes. As visitas usam lugares de apoio e preservam as mesas de trabalho. Os rótulos apresentam somente o nome e a função.
+
 ## Atualizações
 
 Em **Configurações → Sobre**, **Verificar agora** consulta versões e **Atualizar para v…** instala a versão estável mais recente. O instalador está disponível no serviço nativo Windows preparado com o launcher de atualização. A ação exige abrir a página no próprio computador e encerrar os terminais criados pelo Dissero. As consultas e instalações usam exclusivamente `brunoflma/disserohub`.

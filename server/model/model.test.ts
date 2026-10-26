@@ -217,6 +217,34 @@ function makeOffice(names = new NameStore(null)) {
 const act = (id: string, at: number, kind: Activity['kind'] = 'read'): Activity => ({ id, at, kind, icon: '📖', text: 'Lendo x' });
 
 describe('Office', () => {
+  it('mantém projeto cadastrado após a limpeza de agente de outra sala', () => {
+    const { office, advance, now } = makeOffice();
+    const projectId = office.registerProject('/p/manual', now());
+    office.addMain({ id: 'acc:1', account: 'acc', sessionId: 's1', cwd: '/p/temporaria', role: 'Agente principal', startedAt: now(), status: 'working' });
+    office.closeMain('acc:1');
+    advance(OFFLINE_GRACE_MS + 1);
+    office.tick();
+
+    expect(office.commit().snapshot.rooms).toContainEqual(expect.objectContaining({ id: projectId, path: '/p/manual', registered: true }));
+  });
+
+  it('retira o cadastro sem remover a sala enquanto um agente ainda a ocupa', () => {
+    const { office, advance, now } = makeOffice();
+    const projectId = office.registerProject('/p/manual', now());
+    office.addMain({ id: 'acc:1', account: 'acc', sessionId: 's1', cwd: '/p/manual', role: 'Agente principal', startedAt: now(), status: 'working' });
+
+    expect(office.unregisterProject('/p/manual')).toBe(true);
+    let snapshot = office.commit().snapshot;
+    expect(snapshot.rooms).toContainEqual(expect.objectContaining({ id: projectId, path: '/p/manual' }));
+    expect(snapshot.rooms.find((room) => room.id === projectId)?.registered).toBeUndefined();
+
+    office.closeMain('acc:1');
+    advance(OFFLINE_GRACE_MS + 1);
+    office.tick();
+    snapshot = office.commit().snapshot;
+    expect(snapshot.rooms.some((room) => room.id === projectId)).toBe(false);
+  });
+
   it('avisos com dedupe de 10 s e feed em lote', () => {
     const { office, advance, now } = makeOffice();
     office.addMain({ id: 'acc:1', account: 'acc', sessionId: 's1', cwd: '/p/loja/', role: 'Agente principal', startedAt: now(), status: 'working' });

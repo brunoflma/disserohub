@@ -68,6 +68,8 @@ export interface UiContext {
   openHelp(section?: HelpSection): void;
   /** Escolhe uma pasta para adicionar uma sala ao escritório. */
   openProject?(opener?: HTMLElement): void;
+  /** Abre o formulário de nova tarefa com a pasta da sala já selecionada. */
+  openNewAgent?(folder: string, opener: HTMLElement): void;
   toggleSettings(): void;
   /** Abre o campo de renomear a sala perto do ponto (px da janela); botão direito na sala (ui/roomrename.ts). */
   renameRoom?(roomId: string, at: { x: number; y: number }): void;

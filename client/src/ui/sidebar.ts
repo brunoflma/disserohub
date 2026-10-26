@@ -12,10 +12,18 @@ import { groupRooms, visibleShells, type AgentNode, type RoomGroup } from './mod
 import { officeIsEmpty } from './overlays';
 import { createAgentRow, updateAgentRow } from './rows';
 import { createAccountChip, createProgress, updateAccountChip, updateProgress } from './widgets';
+import { canOpenSpawn } from './spawn';
+import { unregisterProject } from './projects';
 import { tr } from '../../../shared/i18n';
 
 interface RoomRefs {
+  id: string;
+  roomPath: string;
+  roomName: string;
   head: HTMLButtonElement;
+  actions: HTMLElement;
+  task: HTMLButtonElement;
+  remove: HTMLButtonElement;
   name: HTMLElement;
   count: HTMLElement;
   path: HTMLElement;
@@ -57,6 +65,7 @@ export class Sidebar implements UiComponent {
   /** Sala sendo arrastada (reordenar as salas) e a ordem mostrada agora. */
   private draggingRoom: string | null = null;
   private shownRooms: string[] = [];
+  private removingProjects = new Set<string>();
   private empty: HTMLElement;
   private emptyText: HTMLElement;
   private clearBtn: HTMLButtonElement;
@@ -164,6 +173,8 @@ export class Sidebar implements UiComponent {
   render(): void {
     setHidden(this.addProject, !access().projects || this.ctx.store.mock || this.ctx.store.replaying);
     const snap = this.ctx.store.snapshot;
+    const registered = new Set((snap?.rooms ?? []).filter((room) => room.registered).map((room) => room.id));
+    for (const id of this.removingProjects) if (!registered.has(id)) this.removingProjects.delete(id);
     const accounts = snap?.accounts ?? [];
     const hidden = new Set(this.ctx.prefs.hiddenAccounts);
     this.filterList.sync(accounts.length > 1 ? accounts : []);
@@ -253,13 +264,39 @@ export class Sidebar implements UiComponent {
       const r = head.getBoundingClientRect();
       this.ctx.renameRoom(g.room.id, { x: r.left + 12, y: r.bottom + 4 });
     });
+    let section: HTMLElement | null = null;
+    const taskIcon = h('span', { class: 'ui-px-icon', attrs: { 'aria-hidden': 'true' } });
+    taskIcon.innerHTML = ICONS.newAgent;
+    const task = h(
+      'button',
+      { class: 'ui-btn ui-room__task', type: 'button', attrs: { 'aria-label': tr('Nova tarefa: {0}', [g.room.name]), 'aria-haspopup': 'dialog', 'aria-controls': 'ui-spawn', 'aria-expanded': 'false' }, on: { click: () => {
+        const refs = section && this.roomRefs.get(section);
+        if (!refs || task.disabled || !canOpenSpawn(access().spawn, this.ctx.store.mock, this.ctx.store.replaying)) return;
+        this.ctx.openNewAgent?.(refs.roomPath, task);
+      } } },
+      taskIcon,
+      h('span', { text: tr('Nova tarefa') }),
+    );
+    const remove = iconButton(ICONS.close, tr('Tirar {0}', [g.room.name]), () => {
+      const refs = section && this.roomRefs.get(section);
+      if (!refs || remove.disabled || !access().projects || this.ctx.store.mock || this.ctx.store.replaying || this.removingProjects.has(refs.id)) return;
+      this.removingProjects.add(refs.id);
+      this.ctx.invalidate();
+      void unregisterProject(refs.roomPath).then(() => {
+        this.ctx.announce(tr('Projeto {0} removido do escritório.', [refs.roomName]));
+      }).catch((error) => {
+        this.removingProjects.delete(refs.id);
+        this.ctx.announce(error instanceof Error ? error.message : tr('Não foi possível remover o projeto.'));
+      }).finally(() => this.ctx.invalidate());
+    }, 'ui-icon-btn--sm ui-room__remove');
+    const actions = h('div', { class: 'ui-room__actions' }, task, remove);
     try {
       setStyleVar(head, '--room', roomTheme(g.room.seed).accent);
     } catch {
       // Sem tema: mantém a cor padrão do CSS.
     }
     const agentsEl = h('ul', { class: 'ui-nodes' });
-    const section = h('section', { class: 'ui-room', role: 'listitem' }, head, agentsEl);
+    section = h('section', { class: 'ui-room', role: 'listitem' }, head, actions, agentsEl);
     const accs = new KeyedList<AccountInfo | string>(accsEl, {
       animate: false,
       key: (a) => (typeof a === 'string' ? a : a.id),
@@ -271,13 +308,16 @@ export class Sidebar implements UiComponent {
       create: (n) => this.createNode(n),
       update: (el, n) => this.updateNode(el, n),
     });
-    this.roomRefs.set(section, { head, name, count, path, accs, tasks, tasksBar, tasksText, nodes });
+    this.roomRefs.set(section, { id: g.room.id, roomPath: g.room.path, roomName: g.room.name, head, actions, task, remove, name, count, path, accs, tasks, tasksBar, tasksText, nodes });
     return section;
   }
 
   private updateRoom(section: HTMLElement, g: RoomGroup): void {
     const r = this.roomRefs.get(section)!;
     const sel = this.ctx.selection();
+    r.id = g.room.id;
+    r.roomPath = g.room.path;
+    r.roomName = g.room.name;
     setText(r.name, g.room.name);
     const present = g.nodes.reduce((n, node) => n + 1 + node.subs.length, 0);
     setText(r.count, String(present));
@@ -290,6 +330,21 @@ export class Sidebar implements UiComponent {
     r.head.classList.toggle('is-selected', selected);
     setAttr(r.head, 'aria-current', selected ? 'true' : null);
     section.classList.toggle('is-empty', present === 0);
+    const mockOrReplay = this.ctx.store.mock || this.ctx.store.replaying;
+    const canStart = canOpenSpawn(access().spawn, this.ctx.store.mock, this.ctx.store.replaying);
+    const canManageProjects = !!access().projects && !mockOrReplay;
+    const taskLabel = tr('Nova tarefa: {0}', [g.room.name]);
+    setAttr(r.task, 'aria-label', taskLabel);
+    setTitle(r.task, canStart ? taskLabel : `${taskLabel}. ${tr('novo agente pelo escritório desligado')}`);
+    setAttr(r.task, 'aria-description', canStart ? null : tr('novo agente pelo escritório desligado'));
+    r.task.disabled = !canStart;
+    setHidden(r.task, mockOrReplay);
+    setHidden(r.remove, !g.room.registered || !canManageProjects);
+    setAttr(r.remove, 'aria-label', tr('Tirar {0} do escritório', [g.room.name]));
+    setTitle(r.remove, tr('Tirar {0} do escritório; a pasta e as sessões continuam no computador.', [g.room.name]));
+    setAttr(r.remove, 'aria-description', tr('A pasta e as sessões continuam no computador.'));
+    r.remove.disabled = this.removingProjects.has(g.room.id);
+    setHidden(r.actions, mockOrReplay);
 
     const t = g.tasks;
     setHidden(r.tasks, t.total === 0);

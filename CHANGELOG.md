@@ -10,6 +10,19 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+### Projetos e início de tarefas
+
+- Salas cadastradas manualmente permanecem no escritório quando agentes de outras salas encerram suas sessões.
+- Cada sala oferece Nova tarefa com a pasta preenchida; a disponibilidade segue as permissões de criação de sessões da instalação.
+- O cadastro pode ser retirado do escritório sem apagar a pasta nem encerrar agentes em atividade.
+- O formulário de tarefa permanece dentro da tela quando aberto pela lista de salas.
+
+### Vida no escritório
+
+- Destinos variados e permanências mais longas para visitantes e equipe de apoio, com troca de visitantes após saída e intervalo de retorno.
+- Equipe de apoio visita locais livres próximos de agentes em atividade, com intervalos entre visitas e preservação das mesas de trabalho.
+- Rótulos mostram o nome e a função dos personagens, sem o complemento ambiente.
+
 ## [1.0.3.8] - 2026-10-25
 
 ### Ritmo de uso

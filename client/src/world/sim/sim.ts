@@ -30,7 +30,7 @@ import {
   type Mode,
 } from './behavior';
 import { Character, dirOf, facing } from './character';
-import { AmbientOffice } from './ambient';
+import { AmbientOffice, type AmbientAgentPosition } from './ambient';
 import { Elevator } from './elevator';
 import { RoomFxState } from './github';
 import { RoomState } from './room-state';
@@ -151,6 +151,27 @@ export class Sim {
     this.spots.setSpots(this.building.spots);
     for (const s of this.spots.ofKind('elevator')) this.elevators.push(new Elevator(this.elevators.length, s.id));
     this.ambient = new AmbientOffice(art, this, options);
+  }
+
+  /** Snapshot mínimo para passeios ambient: cômodo e tile de agentes presentes em trabalho/shell. */
+  workingAgentPositions(): readonly AmbientAgentPosition[] {
+    const positions: AmbientAgentPosition[] = [];
+    for (const ch of this.chars.values()) {
+      if (ch.gone || ch.leaving || ch.inside || ch.arriving || ch.alpha < 0.99 || (ch.mode !== 'work' && ch.mode !== 'shell')) continue;
+      const room = this.rooms.get(ch.roomId);
+      if (!room || !room.present || room.ghost || !room.listed || !inRect(room.layout.rect, ch.tx, ch.ty)) continue;
+      positions.push({ roomId: room.id, tx: ch.tx, ty: ch.ty });
+    }
+    return positions;
+  }
+
+  /** Consulta booleana para evitar nomes ambient iguais aos de agentes reais sem expor sua lista. */
+  isAgentNameInUse(name: string): boolean {
+    const normalized = name.trim().normalize('NFC').toLocaleLowerCase();
+    for (const ch of this.chars.values()) {
+      if (!ch.gone && ch.info.name.trim().normalize('NFC').toLocaleLowerCase() === normalized) return true;
+    }
+    return false;
   }
 
   // =================================================================== snapshot
@@ -610,6 +631,7 @@ export class Sim {
       if (this.options().reducedMotion) ch.animT = 0;
       else this.runCharacter(ch, dt, now);
     }
+    this.ambient.cleanupGone(now);
     for (const [id, ch] of this.chars) {
       if (ch.gone) {
         this.spots.releaseAll(id);
@@ -648,7 +670,8 @@ export class Sim {
         dirty = true;
       }
       if (!room.listed && (room.phase === 'ready' || room.phase === 'building')) {
-        const occupants = this.occupants(room);
+        this.ambient.roomUnavailable(room.id, now);
+        const occupants = this.occupants(room) + this.ambient.occupantsInRoom(room.layout.rect);
         // segurança: sala sem ninguém e luz acesa sem ninguém para apagar
         if (occupants === 0 && room.lightOn && !this.switchClaimValid(room) && now - room.unlistedAt > 2500) room.setLight(false, now);
         const ok = canDismantle({ listed: room.listed, occupants, lightOn: room.lightOn, dark: room.light(now) <= 0.01, unlistedForMs: now - room.unlistedAt }, 0);
@@ -725,6 +748,7 @@ export class Sim {
     this.relayout();
     // os lugares da fantasma não são de ninguém (nenhum passeio ou roda vai parar lá)
     for (const s of ghostLayout.spots) this.spots.reserve(s.id, GHOST_OWNER);
+    this.ambient.roomMoved(room.id, ghostId, alias, before.rect, now);
 
     for (const ch of this.chars.values()) {
       if (ch.gone) continue;

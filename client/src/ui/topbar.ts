@@ -1,6 +1,6 @@
 // Barra superior: marca, conexão, contadores, uso por conta e botões de controle.
 import { access } from '../net/access';
-import { SpawnPanel } from './spawn';
+import { canOpenSpawn, SpawnPanel } from './spawn';
 import type { UiComponent, UiContext } from './context';
 import { h, iconButton, setAttr, setHidden, setStyleVar, setText, setTitle, setVariant } from './dom';
 import { formatDuration, formatInt } from './format';
@@ -100,6 +100,10 @@ export class TopBar implements UiComponent {
     this.settingsBtn = iconButton(ICONS.settings, tr('Configurações'), () => ctx.toggleSettings());
     this.settingsBtn.setAttribute('aria-haspopup', 'dialog');
     this.spawnPanel = new SpawnPanel(ctx);
+    ctx.openNewAgent = (folder, opener) => {
+      if (!canOpenSpawn(access().spawn, ctx.store.mock, ctx.store.replaying)) return;
+      this.spawnPanel.openForFolder(opener, folder);
+    };
     ctx.root.append(this.spawnPanel.el);
     this.spawnBtn = iconButton(ICONS.newAgent, tr('Novo agente: começa uma sessão do Claude Code no computador'), () => this.spawnPanel.toggle(this.spawnBtn), 'ui-btn-spawn');
     this.spawnBtn.setAttribute('aria-haspopup', 'dialog');
@@ -203,7 +207,7 @@ export class TopBar implements UiComponent {
 
     this.usage.render();
     this.version.render();
-    setHidden(this.spawnBtn, !access().spawn || store.mock || store.replaying);
+    setHidden(this.spawnBtn, !canOpenSpawn(access().spawn, store.mock, store.replaying));
 
     this.sidebarBtn.setAttribute('aria-pressed', String(this.ctx.isPanelOpen('sidebar')));
     this.feedBtn.setAttribute('aria-pressed', String(this.ctx.isPanelOpen('feed')));

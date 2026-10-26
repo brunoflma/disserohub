@@ -17,7 +17,7 @@ const WINDOWS_ABSOLUTE = /^[A-Za-z]:[\\/]/;
  * stores only the canonical path and the time it was registered.
  */
 export class ProjectFolders {
-  private addQueue: Promise<void> = Promise.resolve();
+  private mutationQueue: Promise<void> = Promise.resolve();
   private projects: RegisteredProject[] = [];
   private readonly home: string;
 
@@ -61,8 +61,18 @@ export class ProjectFolders {
 
   async add(raw: string): Promise<RegisteredProject> {
     const path = await canonicalDirectory(raw);
-    const result = this.addQueue.then(() => this.register(path));
-    this.addQueue = result.then(() => undefined, () => undefined);
+    return this.enqueue(() => this.register(path));
+  }
+
+  /** Remove somente a entrada do cadastro, sem tocar na pasta ou nas sessões. */
+  async remove(raw: string): Promise<RegisteredProject | undefined> {
+    const path = nativeAbsolutePath(raw, 'project folder');
+    return this.enqueue(() => this.unregister(path));
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.mutationQueue.then(operation);
+    this.mutationQueue = result.then(() => undefined, () => undefined);
     return result;
   }
 
@@ -81,6 +91,20 @@ export class ProjectFolders {
     await this.persist(next);
     this.projects = next;
     return copyProject(project);
+  }
+
+  private async unregister(path: string): Promise<RegisteredProject | undefined> {
+    const current = this.file ? this.readStoredProjects() : this.projects;
+    const key = pathKey(path);
+    const removed = current.find((project) => pathKey(project.path) === key);
+    if (!removed) {
+      this.projects = current;
+      return undefined;
+    }
+    const next = current.filter((project) => pathKey(project.path) !== key);
+    await this.persist(next);
+    this.projects = next;
+    return copyProject(removed);
   }
 
   private readStoredProjects(): RegisteredProject[] {

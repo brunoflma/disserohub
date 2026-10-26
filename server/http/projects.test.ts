@@ -1,6 +1,6 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { OfficeSnapshot } from '../../shared/types';
@@ -75,16 +75,37 @@ describe('cadastro local de projetos', () => {
     remote = true;
     expect((await fetch(`${base}/api/projects/folders`)).status).toBe(403);
     expect((await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: project }) })).status).toBe(403);
+    expect((await fetch(`${base}/api/projects`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: project }) })).status).toBe(403);
     expect(await (await fetch(`${base}/api/access`)).json()).toMatchObject({ projects: false });
     remote = false;
     expect((await fetch(`${base}/api/projects/folders`, { headers: { Origin: 'https://outro.example' } })).status).toBe(403);
+    expect((await fetch(`${base}/api/projects`, { method: 'DELETE', headers: { 'Content-Type': 'application/json', Origin: 'https://outro.example' }, body: JSON.stringify({ path: project }) })).status).toBe(403);
     expect(projects.entries()).toEqual([]);
+  });
+
+  it('remove só o cadastro e preserva a pasta física', async () => {
+    const add = () => fetch(`${base}/api/projects`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: project }) });
+    expect((await add()).status).toBe(201);
+
+    const remove = () => fetch(`${base}/api/projects`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: project }) });
+    const response = await remove();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ removed: true, path: project });
+    expect(projects.entries()).toEqual([]);
+    expect(existsSync(project)).toBe(true);
+
+    const reloaded = new ProjectFolders(join(fixture.dir, 'state', 'projects.json'), fixture.dir);
+    reloaded.load();
+    expect(reloaded.entries()).toEqual([]);
+    expect((await (await fetch(`${base}/api/snapshot`)).json() as OfficeSnapshot).rooms).toEqual([]);
+    expect((await remove()).status).toBe(404);
   });
 
   it('rejeita caminhos inválidos e métodos indevidos sem cadastrar sala', async () => {
     for (const path of ['pasta-relativa', join(fixture.dir, 'arquivo.txt'), '\\\\servidor\\pasta']) {
       expect((await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) })).status).toBe(400);
     }
+    expect((await fetch(`${base}/api/projects`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: 'relativa' }) })).status).toBe(400);
     expect((await fetch(`${base}/api/projects/folders`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status).toBe(405);
     expect(projects.entries()).toEqual([]);
     const snapshot = await (await fetch(`${base}/api/snapshot`)).json() as OfficeSnapshot;
