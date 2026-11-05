@@ -10,6 +10,12 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+## [1.0.3.11] - 2026-11-04
+
+- Removida da seção Sobre a explicação técnica da numeração e da base do Habblaud. A versão do Dissero, a verificação de atualizações e o instalador continuam disponíveis.
+- Documentação de versionamento ajustada para refletir o conteúdo atual da interface.
+- Cenários de navegador do ritmo de uso usam um horário fixo, evitando que o teste do limite diário atravesse a meia-noite e falhe conforme a hora de execução.
+
 ## [1.0.3.10] - 2026-11-04
 
 ### Central de trabalho
@@ -528,7 +534,8 @@ Primeira versão publicada.
   Subagentes chegam, trabalham e entregam ao principal. Mostra as duas contas, com o uso de 5 horas e semanal de
   cada uma (tap de statusline), além de feed de atividade, avisos e modo demonstração. Roda no Node ou no Docker local.
 
-[Não lançado]: https://github.com/brunoflma/disserohub/compare/v1.0.3.10...HEAD
+[Não lançado]: https://github.com/brunoflma/disserohub/compare/v1.0.3.11...HEAD
+[1.0.3.11]: https://github.com/brunoflma/disserohub/releases/tag/v1.0.3.11
 [1.0.3.10]: https://github.com/brunoflma/disserohub/releases/tag/v1.0.3.10
 [0.5.0]: https://github.com/marmottajr/habblaud/releases/tag/v0.5.0
 [0.4.0]: https://github.com/marmottajr/habblaud/releases/tag/v0.4.0

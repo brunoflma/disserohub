@@ -6,13 +6,13 @@ A partir da 1.0.3, o número de uma release do DisseroHub acompanha o número da
 
 | Identificação | Onde fica | Significado nesta versão |
 | --- | --- | --- |
-| Versão pública do DisseroHub | `distributionVersion(package.json)` | 1.0.3.10 |
-| Revisão própria | `disserohub.revision` | 10 |
+| Versão pública do DisseroHub | `distributionVersion(package.json)` | 1.0.3.11 |
+| Revisão própria | `disserohub.revision` | 11 |
 | Base compatível com npm/plugins | `package.json.version` e manifests locais | 1.0.3 |
 | Referência oficial revisada | `disserohub.upstreamReferenceVersion` e `UPSTREAM_REFERENCE_VERSION` | Habblaud 1.0.3 foi comparado e classificado |
 | Base técnica integrada | `disserohub.upstreamVersion` e `UPSTREAM_BASE_VERSION` | Habblaud 0.11.0, com backports e customizações registrados |
 
-A referência revisada não declara uma mesclagem integral do motor. A base técnica só muda quando uma integração correspondente for concluída e validada. A seção Sobre mostra ambas as informações.
+A referência revisada não declara uma mesclagem integral do motor. A base técnica só muda quando uma integração correspondente for concluída e validada. Essas informações ficam nos metadados e na documentação técnica; a seção Sobre apresenta a versão do Dissero e suas atualizações.
 
 O quarto número identifica somente correções do DisseroHub. Tags, releases, `/api/health` e a interface usam a versão pública. Os manifests npm/plugins preservam três números por compatibilidade com suas ferramentas. A próxima referência oficial, por exemplo 1.0.4, começa com revisão zero e é mais recente que qualquer 1.0.3.x. Nunca reutilizar ou mover uma tag já publicada.
 

@@ -10,7 +10,7 @@
   },
   "homepage": "https://github.com/brunoflma/disserohub#readme",
   "disserohub": {
-    "revision": 10,
+    "revision": 11,
     "updateProtocol": 1,
     "dataSchema": 0,
     "upstreamRepository": "marmottajr/habblaud",

@@ -18,7 +18,9 @@ let scenario = 'basic';
 let rev = 1;
 let reads = 0;
 let writes = 0;
-let rhythmNow = Date.now();
+// Start at noon in Fortaleza so the two-hour daily-limit scenario stays in one day.
+const RHYTHM_START = Date.parse('2026-11-04T15:00:00Z');
+let rhythmNow = RHYTHM_START;
 let personalActive = false;
 let agentsActive = false;
 const makeRhythm = () => new WellbeingService({ file: null, now: () => rhythmNow, agentsActive: () => agentsActive,
@@ -80,7 +82,7 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/fixture/rhythm') {
     const name = url.searchParams.get('name') ?? 'reset';
     if (name !== 'advance') {
-      rhythmNow = Date.now(); personalActive = name === 'break' || name === 'daily' || name === 'overlap'; agentsActive = name === 'agents-only' || name === 'overlap';
+      rhythmNow = RHYTHM_START; personalActive = name === 'break' || name === 'daily' || name === 'overlap'; agentsActive = name === 'agents-only' || name === 'overlap';
       rhythm = makeRhythm(); rhythmRoutes = createWellbeingRoutes(rhythm);
       rhythm.configure({ trackingEnabled: true, remindersEnabled: true, breakAfterMinutes: 25, breakMinutes: 5, dailyLimitMinutes: 120 });
       rhythm.sample();
