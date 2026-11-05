@@ -1,7 +1,7 @@
 import { chmodSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { delimiter, join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import {
   cliArgs,
   createCliRunner,
@@ -17,6 +17,12 @@ import {
   type Opener,
 } from './spawn';
 import { runnableClaudeBin } from '../claude-bin';
+
+const childProcess = vi.hoisted(() => ({ execFile: vi.fn() }));
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, execFile: childProcess.execFile as unknown as typeof actual.execFile };
+});
 
 describe('novo agente: pedido e link', () => {
   it('aceita só pasta absoluta e pedido do tamanho certo', () => {
@@ -164,21 +170,46 @@ describe('novo agente em segundo plano (claude --bg)', () => {
 
   it('createCliRunner roda o binário na pasta, sem shell, e lê o id; erro vira a 1ª linha', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hb-spawn-'));
-    const bin = join(dir, 'claude');
-    writeFileSync(
-      bin,
-      `#!/bin/sh\nprintf '%s\\n' "$PWD" "$@" > "${dir}/args"\n[ -f ./trusted ] || { echo 'Workspace not trusted. Run claude once' >&2; exit 1; }\necho 'Starting background service…'\necho 'backgrounded · 7eacc670 · nome'\n`,
-    );
-    chmodSync(bin, 0o755);
+    const bin = join(dir, process.platform === 'win32' ? 'claude.exe' : 'claude');
+    if (process.platform === 'win32') writeFileSync(bin, 'Windows executable fixture');
+    else {
+      writeFileSync(
+        bin,
+        `#!/bin/sh\nprintf '%s\\n' "$PWD" "$@" > "${dir}/args"\n[ -f ./trusted ] || { echo 'Workspace not trusted. Run claude once' >&2; exit 1; }\necho 'Starting background service…'\necho 'backgrounded · 7eacc670 · nome'\n`,
+      );
+      chmodSync(bin, 0o755);
+    }
     writeFileSync(join(dir, 'trusted'), '');
-    expect(runnableClaudeBin({ PATH: `/nao/existe:${dir}` })).toBe(bin);
+    expect(runnableClaudeBin({ PATH: ['/nao/existe', dir].join(delimiter) })).toBe(bin);
     expect(runnableClaudeBin({ HABBLAUD_CLAUDE_BIN: join(dir, 'nada'), PATH: dir })).toBeUndefined();
     const run = createCliRunner(bin);
-    expect(await run({ folder: dir, prompt: 'faça $(rm -rf x) && y' })).toEqual({ ok: true, id: '7eacc670' });
-    const args = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
-    expect(realpathSync(args[0])).toBe(realpathSync(dir));
-    expect(args.slice(1)).toEqual(['--bg', '-n', 'Dissero: faça $(rm -rf x) && y', '--', 'faça $(rm -rf x) && y']);
-    expect(await run({ folder: tmpdir(), prompt: 'oi' })).toEqual({ ok: false, error: 'Workspace not trusted. Run claude once' });
+    if (process.platform === 'win32') {
+      const invocations: Array<{ file: string; args: string[]; options: { cwd?: string; shell?: boolean }; stdinEnded: boolean }> = [];
+      childProcess.execFile.mockImplementation(((file: string, args: string[], options: { cwd?: string; shell?: boolean }, callback: (error: Error | null, stdout: string, stderr: string) => void) => {
+        const invocation = { file, args, options, stdinEnded: false };
+        invocations.push(invocation);
+        const result = invocations.length === 1
+          ? [null, 'Starting background service…\nbackgrounded · 7eacc670 · nome\n', ''] as const
+          : [new Error('failed'), '', 'Workspace not trusted. Run claude once\nsecond line'] as const;
+        callback(result[0], result[1], result[2]);
+        return { stdin: { end: () => (invocation.stdinEnded = true) } };
+      }) as never);
+      expect(await run({ folder: dir, prompt: 'faça $(rm -rf x) && y' })).toEqual({ ok: true, id: '7eacc670' });
+      expect(await run({ folder: tmpdir(), prompt: 'oi' })).toEqual({ ok: false, error: 'Workspace not trusted. Run claude once' });
+      expect(invocations.map(({ file, args, options, stdinEnded }) => ({ file, args, cwd: options.cwd, stdinEnded }))).toEqual([
+        { file: bin, args: ['--bg', '-n', 'Dissero: faça $(rm -rf x) && y', '--', 'faça $(rm -rf x) && y'], cwd: dir, stdinEnded: true },
+        { file: bin, args: ['--bg', '-n', 'Dissero: oi', '--', 'oi'], cwd: tmpdir(), stdinEnded: true },
+      ]);
+      expect(invocations.every(({ options }) => !('shell' in options))).toBe(true);
+    } else {
+      const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+      childProcess.execFile.mockImplementation(((...args: Parameters<typeof actual.execFile>) => actual.execFile(...args)) as never);
+      expect(await run({ folder: dir, prompt: 'faça $(rm -rf x) && y' })).toEqual({ ok: true, id: '7eacc670' });
+      const args = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
+      expect(realpathSync(args[0])).toBe(realpathSync(dir));
+      expect(args.slice(1)).toEqual(['--bg', '-n', 'Dissero: faça $(rm -rf x) && y', '--', 'faça $(rm -rf x) && y']);
+      expect(await run({ folder: tmpdir(), prompt: 'oi' })).toEqual({ ok: false, error: 'Workspace not trusted. Run claude once' });
+    }
   });
 
   it('launch: roda em segundo plano; se não der, abre o app e diz por quê', async () => {

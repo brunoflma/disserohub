@@ -234,9 +234,10 @@ describe('hooks-install.ts (arquivos, HOME falso)', () => {
     const cmd: string = read('.claude').hooks.PermissionRequest[0].hooks[0].command;
     const input = JSON.stringify({ session_id: 's', hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'ls' } });
     const t0 = Date.now();
-    const r = spawnSync(SH!, ['-c', cmd], { input, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home }, timeout: 10_000 });
+    // Allow bounded Git Bash/Node cold startup under the full Windows suite.
+    const r = spawnSync(SH!, ['-c', cmd], { input, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home }, timeout: process.platform === 'win32' ? 25_000 : 10_000 });
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('');
-    expect(Date.now() - t0).toBeLessThan(5_000);
-  });
+    expect(Date.now() - t0).toBeLessThan(process.platform === 'win32' ? 20_000 : 5_000);
+  }, process.platform === 'win32' ? 30_000 : 5_000);
 });

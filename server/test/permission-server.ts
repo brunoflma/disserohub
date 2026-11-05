@@ -4,7 +4,6 @@
 // Com `codex`, também um agente principal do Codex (conta ".codex", thread CODEX_THREAD) e a fonte do Codex ao vivo
 // (`codexLive`, um falso) para o hook do Codex (mod/habblaud-codex/hook.mjs).
 import http from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { AccountsService } from '../accounts/service';
 import { createApiHandler } from '../http/app';
 import { createRequestGuard } from '../http/guard';
@@ -15,6 +14,7 @@ import { createPermissionRoutes } from '../permissions/http';
 import { PermissionRegistry, type RegistryOptions } from '../permissions/registry';
 import type { CodexLive } from '../sources/codex/live';
 import { tempDir } from './fixtures';
+import { listenForFetch } from './fetch-server';
 
 export const MAIN = 'acc:1';
 export const SESSION = 'sess-1';
@@ -79,8 +79,7 @@ export async function servePermissions(
     if (guard(req, res)) return;
     if (!api(req, res, new URL(req.url ?? '/', 'http://x'))) res.writeHead(404).end();
   });
-  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
-  const port = (server.address() as AddressInfo).port;
+  const port = await listenForFetch(server);
   office.addMain({ id: MAIN, account: 'acc', sessionId: SESSION, cwd: '/p/loja', role: 'Agente principal', startedAt: Date.now(), status: 'working' });
   if (opts.codex) {
     office.addMain({ id: CODEX_MAIN, provider: 'codex', account: '.codex', sessionId: CODEX_THREAD, cwd: '/p/loja', role: 'Agente principal', startedAt: Date.now(), status: 'working' });

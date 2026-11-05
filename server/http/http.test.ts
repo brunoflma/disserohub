@@ -1,5 +1,4 @@
 import http from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +8,7 @@ import { setQuiet } from '../log';
 import { NameStore } from '../model/names';
 import { Office, type OfficeDeps } from '../model/office';
 import { tempDir } from '../test/fixtures';
+import { listenForFetch } from '../test/fetch-server';
 import { createApiHandler, type ApiDeps } from './app';
 import { createRequestGuard, hostAllowed, hostnameOf, isLoopbackHost, originAllowed, parseAllowedHosts } from './guard';
 import { Hub } from './sse';
@@ -55,8 +55,7 @@ async function start(extra: Partial<ApiDeps> = {}, officeExtra: Partial<OfficeDe
     const url = new URL(req.url ?? '/', 'http://x');
     if (!api(req, res, url)) serveStatic(req, res, url.pathname);
   });
-  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
-  const port = (server.address() as AddressInfo).port;
+  const port = await listenForFetch(server);
   office.addMain({ id: '.claude:1', account: '.claude', sessionId: 's1', cwd: '/p/loja', role: 'Agente principal', startedAt: Date.now(), status: 'working' });
   return {
     base: `http://127.0.0.1:${port}`,

@@ -24,10 +24,11 @@ vi.mock('./version');
 vi.mock('./update');
 vi.mock('./viewport');
 vi.mock('./wellbeing');
+vi.mock('./work-center');
 vi.mock('../local/camera-tools');
 vi.mock('../local/panel-resizer', () => ({ panelResizer: () => () => {} }));
 vi.mock('./topbar', () => ({ TopBar: class {
-  panelGroup = { prepend() {} };
+  panelGroup = { prepend() {}, insertBefore() {} };
   addPanelButton() {}
   render() {}
 } }));

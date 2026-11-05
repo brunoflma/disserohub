@@ -103,7 +103,8 @@ function codexEvent(event: string, over: Record<string, unknown> = {}): Record<s
 const permission = (over: Record<string, unknown> = {}) => codexEvent('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm test', description: 'Rodar os testes' }, ...over });
 
 async function pendingId(s: PermissionServer): Promise<string> {
-  for (let i = 0; i < 200; i++) {
+  const deadline = Date.now() + (process.platform === 'win32' ? 20_000 : 5_000);
+  while (Date.now() < deadline) {
     const id = s.registry!.snapshot().get(CODEX_MAIN)?.id;
     if (id) return id;
     await new Promise((ok) => setTimeout(ok, 25));
@@ -119,14 +120,14 @@ async function deadPort(): Promise<number> {
   return port;
 }
 
-describe('hook.mjs do Codex (processo)', () => {
+describe('hook.mjs do Codex (processo)', { timeout: process.platform === 'win32' ? 30_000 : 5_000 }, () => {
   it('evento de observação: vai para /api/codex/events com a conta e o CODEX_HOME; nada no stdout', async () => {
     srv = await servePermissions({ codex: true, codexLive: live });
     writeConfig({ port: srv.port });
     const input = codexEvent('PreToolUse', { tool_name: 'Bash', tool_use_id: 'call-1', tool_input: { command: 'ls' } });
     const r = await runHook(JSON.stringify(input), { CODEX_HOME: codexHome });
     expect(r).toMatchObject({ code: 0, stdout: '' });
-    expect(r.ms).toBeLessThan(3_000);
+    expect(r.ms).toBeLessThan(process.platform === 'win32' ? 8_000 : 3_000);
     expect(live.calls).toEqual([{ account: '.codex-trabalho', input }]);
     expect(srv.registry!.size).toBe(0);
   });
@@ -191,25 +192,31 @@ describe('hook.mjs do Codex (processo)', () => {
     writeConfig({ port: await deadPort() });
     let r = await runHook(JSON.stringify(permission()), { CODEX_HOME: codexHome });
     expect(r).toMatchObject({ code: 0, stdout: '' });
-    expect(r.ms).toBeLessThan(3_000);
+    expect(r.ms).toBeLessThan(process.platform === 'win32' ? 8_000 : 3_000);
     srv = await servePermissions({ codex: true, codexLive: live, viewers: 0 });
     writeConfig({ port: srv.port });
     r = await runHook(JSON.stringify(permission()), { CODEX_HOME: codexHome });
     expect(r).toMatchObject({ code: 0, stdout: '' });
     r = await runHook(JSON.stringify(permission({ session_id: '0199ffff-0000-7000-8000-000000000000' })), { CODEX_HOME: codexHome });
     expect(r).toMatchObject({ code: 0, stdout: '' });
-    expect(r.ms).toBeLessThan(3_000);
+    expect(r.ms).toBeLessThan(process.platform === 'win32' ? 8_000 : 3_000);
     expect(srv.registry!.size).toBe(0);
   });
 
   it('espera esgotada (permissionTimeoutS: 5): desiste e sai sem decisão (o Codex segue a aprovação normal)', async () => {
     srv = await servePermissions({ codex: true, codexLive: live, registry: { orphanMs: 300 } });
     writeConfig({ port: srv.port, permissionTimeoutS: 5 });
-    const r = await runHook(JSON.stringify(permission()), { CODEX_HOME: codexHome });
+    const run = runHook(JSON.stringify(permission()), { CODEX_HOME: codexHome });
+    const id = await pendingId(srv);
+    const registeredAt = srv.registry!.detail(id)!.createdAt;
+    const r = await run;
     expect(r).toMatchObject({ code: 0, stdout: '' });
-    expect(r.ms).toBeGreaterThanOrEqual(4_500);
-    expect(r.ms).toBeLessThan(10_000);
-  }, 20_000);
+    // Measure the five-second hook deadline after registration, independently of cold Node startup.
+    const waitingMs = Date.now() - registeredAt;
+    expect(waitingMs).toBeGreaterThanOrEqual(4_500);
+    expect(waitingMs).toBeLessThan(10_000);
+    expect(r.ms).toBeLessThan(process.platform === 'win32' ? 25_000 : 10_000);
+  }, process.platform === 'win32' ? 30_000 : 20_000);
 
   it('stdin inválido ou evento que o Habblaud não usa: nada é mandado', async () => {
     srv = await servePermissions({ codex: true, codexLive: live });

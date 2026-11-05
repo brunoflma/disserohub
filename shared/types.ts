@@ -386,6 +386,8 @@ export interface AccessInfo {
   spawn: boolean;
   /** Pode escolher e cadastrar pastas de projetos no computador local. */
   projects?: boolean;
+  /** Tarefas e revisões persistidas no computador local. */
+  projectTasks?: boolean;
 }
 
 export interface FeedItem {

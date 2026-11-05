@@ -26,7 +26,13 @@ const say = (id: string, s: number, text: string, stop = 'end_turn') => ({
   message: { id: `m-${id}`, role: 'assistant', stop_reason: stop, content: [{ type: 'text', text }] },
 });
 
-const REPLY = `**O relatório está pronto** e foi enviado. Veja [o PDF](/Users/ana/proj/relatorio.pdf) e ./telas/antes.png.
+const TEST_ROOT = join(process.platform === 'win32' ? 'C:\\' : '/', 'Users', 'ana');
+const PROJECT = join(TEST_ROOT, 'proj');
+const PDF = join(PROJECT, 'relatorio.pdf');
+const WINDOWS_PDF = 'C:\\Users\\ana\\proj\\relatorio.pdf';
+const PRINT = join(PROJECT, 'print.png');
+const PROTECTED = join(TEST_ROOT, '.ssh', 'id_rsa');
+const REPLY = `**O relatório está pronto** e foi enviado. Veja [o PDF](${PDF}) e ./telas/antes.png.
 
 | a | b |
 |---|---|
@@ -36,12 +42,12 @@ Em poucas palavras: o relatório de vendas agora mostra o último dia certo, e o
 function transcript(): string[] {
   return [
     user('u1', 0, 'Corrija o relatório de vendas'),
-    tool('a1', 1, 'Edit', { file_path: '/Users/ana/proj/src/x.ts', old_string: 'a', new_string: 'b' }),
+    tool('a1', 1, 'Edit', { file_path: join(PROJECT, 'src', 'x.ts'), old_string: 'a', new_string: 'b' }),
     say('a2', 2, 'Ainda trabalhando, já volto.', 'tool_use'),
     shot('r1', 3, 'AAAA'),
     shot('r2', 4, 'BBBB'),
     shot('r3', 5, 'CCCC'),
-    tool('a3', 6, 'SendUserFile', { files: ['/Users/ana/proj/print.png', '/Users/ana/.ssh/id_rsa'], caption: 'A tela nova' }),
+    tool('a3', 6, 'SendUserFile', { files: [PRINT, PROTECTED], caption: 'A tela nova' }),
     say('a4', 7, REPLY),
     user('u2', 8, 'Obrigado'),
     say('a5', 9, 'De nada!'),
@@ -60,8 +66,9 @@ describe('entregas: texto', () => {
   });
 
   it('links para arquivos de ver: absolutos, relativos ao projeto; nada protegido', () => {
-    expect(linkedFiles(REPLY, '/Users/ana/proj')).toEqual(['/Users/ana/proj/relatorio.pdf']);
-    expect(linkedFiles('veja [a](telas/a.png) e [b](https://x.com/b.png) e /Users/ana/.ssh/k.png', '/Users/ana/proj')).toEqual(['/Users/ana/proj/telas/a.png']);
+    expect(linkedFiles(REPLY, PROJECT)).toEqual([PDF]);
+    expect(linkedFiles(`[o PDF]( ${WINDOWS_PDF} )`, PROJECT)).toEqual([WINDOWS_PDF]);
+    expect(linkedFiles(`veja [a](telas/a.png) e [b](https://x.com/b.png) e ${join(TEST_ROOT, '.ssh', 'k.png')}`, PROJECT)).toEqual([join(PROJECT, 'telas', 'a.png')]);
     expect(linkedFiles('[c](relativo.png)')).toEqual([]);
   });
 });
@@ -72,7 +79,7 @@ describe('entregas: pedidos do transcript', () => {
     expect(turns.map((t) => t.start.text)).toEqual(['Corrija o relatório de vendas', 'Obrigado']);
     const t = turns[0];
     expect([t.tools, t.edited.size, t.ended, t.text.startsWith('**O relatório')]).toEqual([2, 1, true, true]);
-    expect(t.files.map((f) => f.path)).toEqual(['/Users/ana/proj/print.png', '/Users/ana/.ssh/id_rsa']);
+    expect(t.files.map((f) => f.path)).toEqual([PRINT, PROTECTED]);
     expect(t.captures.map((c) => c.data)).toEqual(['BBBB', 'CCCC']);
     expect(last?.start.text).toBe('Agora rode os testes');
     expect(last?.ended).toBe(false);
@@ -84,7 +91,7 @@ describe('entregas: pedidos do transcript', () => {
     writeFileSync(path, transcript().join('\n') + '\n');
     let busy = true;
     const idx = new DeliveryIndex({
-      sessions: async () => [{ account: '.claude', sessionId: 's1', projectDir: 'p', project: '/Users/ana/proj', lastAt: 1, size: 1, open: true, agentId: 'ag' }],
+      sessions: async () => [{ account: '.claude', sessionId: 's1', projectDir: 'p', project: PROJECT, lastAt: 1, size: 1, open: true, agentId: 'ag' }],
       resolve: () => ({ path, createParser: createTerminalParser }),
       isBusy: () => busy,
       agentName: () => 'Estela',
@@ -99,9 +106,9 @@ describe('entregas: pedidos do transcript', () => {
       ['tela-1.png', 'image', 'Tela capturada pelo agente', true],
       ['tela-2.png', 'image', 'Tela capturada pelo agente', true],
     ]);
-    expect(JSON.stringify(list)).not.toContain('/Users/ana/proj/print.png');
+    expect(JSON.stringify(list)).not.toContain(PRINT);
     expect(JSON.stringify(list)).not.toContain('.ssh');
-    expect(idx.attachment(d.attachments[0].id)).toMatchObject({ kind: 'file', path: '/Users/ana/proj/print.png', type: 'image/png' });
+    expect(idx.attachment(d.attachments[0].id)).toMatchObject({ kind: 'file', path: PRINT, type: 'image/png' });
     expect(idx.attachment(d.attachments[2].id)).toMatchObject({ kind: 'capture', type: 'image/png' });
     expect(idx.attachment('nao-existe')).toBeUndefined();
     // "De nada!" sem ferramentas não é entrega; o último pedido conta só quando o agente para.

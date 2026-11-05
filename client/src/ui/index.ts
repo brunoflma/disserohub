@@ -28,6 +28,7 @@ import { HelpDialog } from './help';
 import { ProjectDialog } from './projects';
 import { HistoryPopover } from './history';
 import { Deliveries } from './deliveries';
+import { WorkCenter } from './work-center';
 import { HoverTip } from './hovertip';
 import { hasRunningShells } from './model';
 import { hasCodexPermission } from './provider';
@@ -220,6 +221,9 @@ export function createUI(root: HTMLElement, store: OfficeStore, world: WorldApi)
   // Entregas: o que os agentes terminaram (primeiro botão do grupo: é o que mais se usa pelo celular).
   const deliveries = new Deliveries(ctx, terminal);
   topbar.panelGroup.prepend(deliveries.button);
+  const workCenter = new WorkCenter(ctx, { history: () => history.toggle(), delivery: id => { void deliveries.openById(id); } });
+  topbar.panelGroup.insertBefore(workCenter.button, history.button);
+  root.append(workCenter.el);
   // Links com ?agent= / ?delivery= (abrem o agente ou a entrega ao carregar).
   const openLink = (url: URL) => {
     const agent = url.searchParams.get('agent');
@@ -293,7 +297,7 @@ export function createUI(root: HTMLElement, store: OfficeStore, world: WorldApi)
   });
   if (prefs.cameraView) world.restoreCamera?.(prefs.cameraView);
 
-  const components: UiComponent[] = [topbar, sidebar, drawer, terminal, pty, history, deliveries, feed, cameraTools, toasts, settings, empty, banner, tip, notifier, splash, timelapse, sound, day, wellbeing, updateToaster];
+  const components: UiComponent[] = [topbar, sidebar, drawer, terminal, pty, history, deliveries, workCenter, feed, cameraTools, toasts, settings, empty, banner, tip, notifier, splash, timelapse, sound, day, wellbeing, updateToaster];
 
   // ---------------------------------------------------------------- renderização agrupada por quadro
   let rafId = 0;

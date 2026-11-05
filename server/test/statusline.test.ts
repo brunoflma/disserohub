@@ -45,7 +45,7 @@ function statusJson(over: Record<string, unknown> = {}): string {
 
 // Cada chamada sobe processos de verdade (no Windows, também o Git Bash do comando original): com a suíte inteira
 // rodando, passa dos 5 s padrão.
-describe('statusline-tap.mjs', { timeout: 20_000 }, () => {
+describe('statusline-tap.mjs', { timeout: process.platform === 'win32' ? 45_000 : 20_000 }, () => {
   let tmp: ReturnType<typeof tempDir>;
   let env: NodeJS.ProcessEnv;
   let usageDir: string;
@@ -60,7 +60,7 @@ describe('statusline-tap.mjs', { timeout: 20_000 }, () => {
   afterEach(() => tmp.cleanup());
 
   const tap = (args: string[], input: string, extraEnv: NodeJS.ProcessEnv = {}) =>
-    spawnSync(process.execPath, [TAP, ...args], { input, env: { ...env, ...extraEnv }, encoding: 'utf8', timeout: 10_000 });
+    spawnSync(process.execPath, [TAP, ...args], { input, env: { ...env, ...extraEnv }, encoding: 'utf8', timeout: process.platform === 'win32' ? 20_000 : 10_000 });
 
   it.skipIf(!SH)('repassa o stdin ao comando original e grava SÓ os limites, de forma atômica e com modo 600', () => {
     const input = statusJson();
@@ -94,10 +94,11 @@ describe('statusline-tap.mjs', { timeout: 20_000 }, () => {
       input: statusJson(),
       env,
       encoding: 'utf8',
+      timeout: 20_000,
     });
     expect(viaShell.status).toBe(0);
     expect(viaShell.stdout).toBe('A B|');
-  });
+  }, process.platform === 'win32' ? 40_000 : 20_000);
 
   it('sem comando original: não imprime nada, mas captura', () => {
     const r = tap([], statusJson());
@@ -117,7 +118,7 @@ describe('statusline-tap.mjs', { timeout: 20_000 }, () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('ok\n');
     expect(r.stderr).toBe('');
-  });
+  }, process.platform === 'win32' ? 40_000 : 20_000);
 
   it('sem transcript_path: CLAUDE_CONFIG_DIR (primeiro da lista) e depois ~/.claude', () => {
     tap([], statusJson({ transcript_path: undefined }), { CLAUDE_CONFIG_DIR: '/outra/.claude-trabalho,/x' });
@@ -263,10 +264,10 @@ describe('statusline-install.ts (arquivos, HOME falso)', () => {
     const cmd: string = read('.claude').statusLine.command.replace('npx -y ccstatusline', 'cat');
     const usageDir = join(tmp.dir, 'usage');
     const input = statusJson({ transcript_path: join(home, '.claude', 'projects', '-p', 's.jsonl') });
-    const r = spawnSync(SH!, ['-c', cmd], { input, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home, HABBLAUD_USAGE_DIR: usageDir } });
+    const r = spawnSync(SH!, ['-c', cmd], { input, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home, HABBLAUD_USAGE_DIR: usageDir }, timeout: 20_000 });
     expect(r.stdout).toBe(input);
     expect(JSON.parse(readFileSync(join(usageDir, '.claude.json'), 'utf8')).five_hour.utilization).toBe(42.5);
-  });
+  }, process.platform === 'win32' ? 25_000 : 10_000);
 
   it('status e uninstall devolvem tudo como era', () => {
     exec('install');

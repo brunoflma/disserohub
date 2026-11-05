@@ -180,7 +180,8 @@ describe('demoTerminalEntries', () => {
         if (prev) {
           // O que já existia e continua na janela tem o mesmo conteúdo.
           const now = new Map(entries.map((x) => [x.id, x]));
-          for (const old of prev) if (now.has(old.id)) expect(now.get(old.id)).toEqual(old);
+          // These entries are JSON-compatible. Keep the full matcher for differences, with a fast path for identical content.
+          for (const old of prev) if (now.has(old.id) && JSON.stringify(now.get(old.id)) !== JSON.stringify(old)) expect(now.get(old.id)).toEqual(old);
           checked++;
         }
         lists.set(a.id, entries);

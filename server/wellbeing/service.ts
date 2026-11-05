@@ -216,7 +216,7 @@ function readAgentSample(source: () => boolean): { active: boolean; observed: bo
 }
 
 function isDesktopActive(focus: FocusSample): boolean {
-  return focus.supported && focus.active && (focus.idleMs === undefined || focus.idleMs < 5 * MS_PER_MINUTE);
+  return focus.supported && focus.active && (focus.idleMs === undefined || focus.idleMs < 2 * MS_PER_MINUTE);
 }
 
 function sanitizeStored(raw: unknown, now: number): StoredWellbeing | null {
@@ -266,6 +266,9 @@ export class WellbeingService {
   private lastAt: number | null = null;
   private lastDesktopSupported = false;
   private lastDesktopActive = false;
+  private desktopObservedUntil = 0;
+  private desktopActiveUntil = 0;
+  private agentsObservedUntil = 0;
   private lastAgentsActive = false;
   private lastAgentsObserved = false;
   private readonly browserLeases = new Map<string, BrowserLease>();
@@ -354,9 +357,12 @@ export class WellbeingService {
     const focus = safeFocus(this.options.desktop, now);
     this.lastDesktopSupported = focus.supported;
     this.lastDesktopActive = isDesktopActive(focus);
+    this.desktopObservedUntil = focus.supported ? focus.sampledAt! + WELLBEING_FOCUS_FRESH_MS : now;
+    this.desktopActiveUntil = this.lastDesktopActive ? Math.min(this.desktopObservedUntil, now + Math.max(0, 2 * MS_PER_MINUTE - (focus.idleMs ?? 0))) : now;
     const agents = readAgentSample(this.options.agentsActive);
     this.lastAgentsActive = agents.active;
     this.lastAgentsObserved = agents.observed;
+    this.agentsObservedUntil = agents.observed ? now + WELLBEING_MAX_INTERVAL_MS : now;
     if (this.lastAt === null) this.lastAt = now;
     this.dirty = true;
   }
@@ -522,15 +528,18 @@ export class WellbeingService {
       if (pauseEnd > pauseStart) this.pauseObservedMs += pauseEnd - pauseStart;
     }
     if (dt > 0 && dt <= WELLBEING_MAX_INTERVAL_MS) {
-      if (this.lastAgentsObserved) insertMerged(this.coverage, from, now);
-      if (this.lastAgentsObserved && this.lastAgentsActive) insertMerged(this.agents, from, now);
+      const agentEnd = Math.min(now, this.agentsObservedUntil);
+      if (this.lastAgentsObserved && agentEnd > from) insertMerged(this.coverage, from, agentEnd);
+      if (this.lastAgentsObserved && this.lastAgentsActive && agentEnd > from) insertMerged(this.agents, from, agentEnd);
 
       if (this.preferences.trackingEnabled && this.pauseStartedAt === null) {
         const personalCoverageRanges: Interval[] = [];
         const activeRanges: Interval[] = [];
         if (this.lastDesktopSupported) {
-          personalCoverageRanges.push([from, now]);
-          if (this.lastDesktopActive) activeRanges.push([from, now]);
+          const observedEnd = Math.min(now, this.desktopObservedUntil);
+          const activeEnd = Math.min(now, this.desktopActiveUntil);
+          if (observedEnd > from) personalCoverageRanges.push([from, observedEnd]);
+          if (this.lastDesktopActive && activeEnd > from) activeRanges.push([from, activeEnd]);
         }
         for (const lease of this.browserLeases.values()) {
           if (lease.observedUntil > from) personalCoverageRanges.push([from, Math.min(now, lease.observedUntil)]);
@@ -625,12 +634,12 @@ export class WellbeingService {
   private currentReminder(now: number, tz: string): WellbeingReport['reminder'] {
     if (!this.preferences.trackingEnabled || !this.preferences.remindersEnabled || this.pauseStartedAt !== null || now < this.snoozedUntil) return undefined;
     const safeTz = canonicalTimeZone(tz) ?? systemTimeZone();
-    if (this.continuousMs >= this.preferences.breakAfterMinutes * MS_PER_MINUTE && this.continuousStartAt !== null) {
-      return { id: `break:${Math.floor(this.continuousStartAt)}:${Math.floor(this.snoozedUntil)}`, kind: 'break' };
-    }
     const day = wellbeingPeriodRange('day', now, safeTz);
     if (measure(this.personal, day.start, day.end) >= this.preferences.dailyLimitMinutes * MS_PER_MINUTE) {
       return { id: `daily:${Math.floor(day.start)}:${Math.floor(this.snoozedUntil)}`, kind: 'daily' };
+    }
+    if (this.continuousMs >= this.preferences.breakAfterMinutes * MS_PER_MINUTE && this.continuousStartAt !== null) {
+      return { id: `break:${Math.floor(this.continuousStartAt)}:${Math.floor(this.snoozedUntil)}`, kind: 'break' };
     }
     return undefined;
   }

@@ -25,6 +25,8 @@ export class WellbeingPanel implements UiComponent {
   private pulsePending = false;
   private lastView = '';
   private notifiedId?: string;
+  private announcedId?: string;
+  private wasLive = false;
   private claiming = false;
   private settingsExpanded = false;
   private renderedPeriod: WellbeingPeriod = 'day';
@@ -92,21 +94,23 @@ export class WellbeingPanel implements UiComponent {
   }
 
   private tick(): void {
-    if (this.ctx.store.mock) return;
+    if (!this.live()) { void this.pulse(); return; }
     const now = Date.now();
     if (now >= this.nextPulse) { this.nextPulse = now + 15_000; void this.pulse(); }
     if (now >= this.nextRefresh) { this.nextRefresh = now + (document.hidden ? 15_000 : 5_000); void this.refresh(); }
   }
   private async pulse(): Promise<void> {
-    if (this.pulsePending || this.ctx.store.mock) return;
+    const live = this.live();
+    if (this.pulsePending || (!live && !this.wasLive)) return;
     this.pulsePending = true;
     try {
-      await this.client.pulse(activityRecent(this.lastInteraction, Date.now(), document.hasFocus(), !document.hidden, this.report?.preferences.trackingEnabled !== false && !this.ctx.isTimelapseOpen()));
+      await this.client.pulse(activityRecent(this.lastInteraction, Date.now(), document.hasFocus(), !document.hidden, live && this.report?.preferences.trackingEnabled !== false));
+      this.wasLive = live;
     } catch { /* the lease expires server-side; do not count disconnected time */ }
     finally { this.pulsePending = false; }
   }
   private async refresh(): Promise<void> {
-    if (this.loading) return;
+    if (this.loading || !this.live()) return;
     this.loading = true;
     try { this.report = await this.client.snapshot(); this.failure = ''; this.notify(); }
     catch (error) { this.failure = error instanceof Error ? error.message : 'Acompanhamento indisponível. Tente novamente.'; }
@@ -123,14 +127,14 @@ export class WellbeingPanel implements UiComponent {
     if (this.el.open) this.el.close();
   }
   private async act(action: WellbeingAction): Promise<void> {
-    if (this.saving) return;
+    if (this.saving || !this.live()) return;
     this.saving = true;
     try { this.report = await this.client.action(action); this.failure = ''; }
     catch (error) { this.failure = error instanceof Error ? error.message : 'Não foi possível salvar. Tente novamente.'; this.open(); }
     finally { this.saving = false; this.lastView = ''; this.ctx.invalidate(); }
   }
   private async configure(patch: Partial<WellbeingPreferences>): Promise<void> {
-    if (this.saving) return;
+    if (this.saving || !this.live()) return;
     this.saving = true;
     try { this.report = await this.client.configure(patch); this.failure = ''; }
     catch (error) { this.failure = error instanceof Error ? error.message : 'Não foi possível salvar a preferência.'; }
@@ -138,22 +142,35 @@ export class WellbeingPanel implements UiComponent {
   }
   private notify(): void {
     const reminder = this.report?.reminder;
-    if (!reminder || reminder.id === this.notifiedId || this.claiming) return;
+    if (!reminder || !this.live()) return;
+    if (!document.hidden && document.hasFocus() && reminder.id !== this.announcedId) {
+      this.announcedId = reminder.id;
+      this.ctx.announce(reminder.kind === 'break' ? 'Que tal uma pausa? Você atingiu o intervalo de uso ativo que configurou.' : 'Seu limite de uso de hoje foi atingido. Considere uma pausa mais longa.');
+    }
+    // An ineligible foreground tab must not consume the one system notification for every tab.
+    if (reminder.id === this.notifiedId || this.claiming || !this.canNotifySystem()) return;
     this.claiming = true;
     void this.client.action('ack', reminder.id).then((report) => {
-      this.notifiedId = reminder.id;
-      if (!report.notificationClaimed) return;
-      this.ctx.announce(reminder.kind === 'break' ? 'Que tal uma pausa? Você atingiu o intervalo de uso ativo que configurou.' : 'Seu limite de uso de hoje foi atingido. Considere uma pausa mais longa.');
-      if (document.hidden && this.ctx.prefs.browserNotifications && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      if (!report.notificationClaimed) { this.notifiedId = reminder.id; return; }
+      if (this.live() && this.canNotifySystem() && report.reminder?.id === reminder.id) {
         const notification = new Notification(reminder.kind === 'break' ? 'Que tal uma pausa?' : 'Seu ritmo de hoje', { body: 'O intervalo de uso que você configurou foi atingido. Abra o Dissero para acompanhar.', tag: 'dissero-wellbeing' });
+        this.notifiedId = reminder.id;
         notification.onclick = () => { notification.close(); window.focus(); this.open(); };
       }
     }).catch(() => {}).finally(() => { this.claiming = false; });
   }
 
+  private live(): boolean {
+    return !this.ctx.store.mock && this.ctx.store.connection === 'open' && !!this.ctx.store.snapshot && !this.ctx.store.snapshot.meta.demo && !this.ctx.store.replaying && !this.ctx.isTimelapseOpen();
+  }
+  private canNotifySystem(): boolean {
+    return (document.hidden || !document.hasFocus()) && this.ctx.prefs.browserNotifications && typeof Notification !== 'undefined' && Notification.permission === 'granted';
+  }
+
   render(): void {
-    const reminder = this.failure ? undefined : this.report?.reminder;
-    setHidden(this.reminderEl, !reminder || this.ctx.store.mock);
+    const live = this.live();
+    const reminder = this.failure || !live ? undefined : this.report?.reminder;
+    setHidden(this.reminderEl, !reminder);
     this.button.classList.toggle('is-rhythm-due', !!reminder);
     if (reminder) {
       setText(this.noticeTitle, reminder.kind === 'break' ? 'Que tal uma pausa?' : 'Seu limite de hoje foi atingido');
@@ -163,7 +180,7 @@ export class WellbeingPanel implements UiComponent {
     // Keep a native select open while new samples arrive; update after focus leaves it.
     if (document.activeElement instanceof HTMLSelectElement && this.content.contains(document.activeElement)) return;
     for (const [period, button] of this.tabs) setAttr(button, 'aria-pressed', String(this.period === period));
-    const viewKey = `${this.report?.now}|${this.period}|${this.failure}|${this.saving}|${this.ctx.store.mock}`;
+    const viewKey = `${this.report?.now}|${this.period}|${this.failure}|${this.saving}|${live}|${this.ctx.prefs.browserNotifications}`;
     if (viewKey === this.lastView) return;
     this.lastView = viewKey;
     const focusControl = this.content.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.rhythmControl : undefined;
@@ -171,7 +188,7 @@ export class WellbeingPanel implements UiComponent {
     if (oldHistory) this.historyScroll[this.renderedPeriod] = oldHistory.scrollTop;
     this.renderedPeriod = this.period;
     this.content.replaceChildren();
-    if (this.ctx.store.mock) { this.content.append(h('p', { text: 'O acompanhamento pessoal fica desativado na demonstração. Dados simulados não entram no seu histórico.' })); return; }
+    if (!live) { this.content.append(h('p', { text: 'O acompanhamento fica disponível no escritório ao vivo. Demonstração, reprodução e períodos desconectados não geram avisos de uso.' })); return; }
     if (this.failure) this.content.append(h('div', { class: 'ui-rhythm__error', role: 'status' }, h('p', { text: this.failure }), h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: 'Tentar novamente', on: { click: () => void this.refresh() } })));
     if (!this.report) { if (!this.failure) this.content.append(h('p', { text: 'Carregando o acompanhamento…', role: 'status' })); return; }
     const r = this.report;
@@ -249,6 +266,19 @@ export class WellbeingPanel implements UiComponent {
       return h('label', { class: 'ui-rhythm__field' }, h('span', { text: label }), control);
     };
     details.append(select('breakAfterMinutes', 'Lembrar após uso contínuo de', [25, 50, 90, 120]), select('breakMinutes', 'Duração da pausa', [5, 10, 15]), select('dailyLimitMinutes', 'Limite pessoal por dia', [120, 240, 360, 480]), h('p', { class: 'ui-rhythm__hint', text: 'Os alertas usam somente o seu tempo ativo. As preferências são salvas neste computador.' }));
+    const permission = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
+    details.append(h('p', { class: 'ui-rhythm__hint', text: permission === 'granted' && this.ctx.prefs.browserNotifications
+      ? 'Avisos do sistema ativados enquanto a página do Dissero estiver aberta, inclusive ao usar outro aplicativo.'
+      : permission === 'denied' ? 'Os avisos do sistema estão bloqueados no navegador. Libere as notificações deste site nas permissões do navegador. Os lembretes continuam visíveis no Dissero.'
+      : 'Para receber avisos ao usar outro aplicativo, ative as notificações do sistema e mantenha a página do Dissero aberta.' }));
+    if (permission !== 'unsupported' && permission !== 'denied' && (permission !== 'granted' || !this.ctx.prefs.browserNotifications)) {
+      details.append(h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: 'Ativar avisos do sistema', on: { click: () => {
+        void Notification.requestPermission().then(result => {
+          if (result === 'granted') this.ctx.updatePrefs({ browserNotifications: true });
+          this.lastView = ''; this.ctx.invalidate();
+        }).catch(() => { this.failure = 'Não foi possível ativar as notificações. Confira as permissões do navegador.'; this.ctx.invalidate(); });
+      } } }));
+    }
     return details;
   }
 }

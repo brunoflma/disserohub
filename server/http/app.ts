@@ -23,6 +23,8 @@ import type { DeliveryIndex } from '../deliveries/deliveries';
 import type { FileFetcher } from '../deliveries/fetcher';
 import { HOST_WAIT_MS } from '../host-wait';
 import type { ProjectFolders } from '../projects/folders';
+import { ProjectTaskStore, TaskError, taskDelivery } from '../tasks/store';
+import { projectPathKey } from '../../shared/project-tasks';
 import { parsePreferenceEntries, PREFERENCE_BODY_MAX, PREFERENCE_TRANSFER_PATH } from '../../shared/branding';
 import { PreferenceTransfers, preferenceTransferRole } from './branding';
 import { installRoute } from '../updates/http';
@@ -31,6 +33,7 @@ import type { UpdateInstaller } from '../updates/installer';
 export interface ApiDeps {
   wellbeing?: (req: IncomingMessage, res: ServerResponse, url: URL, remote: boolean) => boolean;
   installer?: UpdateInstaller;
+  projectTasks?: ProjectTaskStore;
   office: Office;
   hub: Hub;
   accounts: AccountsService;
@@ -430,6 +433,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           terminal: !!terminals && trusted(req, 'terminal'),
           spawn: !!deps.spawn && trusted(req, 'spawn'),
           ...(deps.projects ? { projects: trusted(req) && isLoopbackAddress(req.socket.remoteAddress) && sameProjectOrigin(req) } : {}),
+          ...(deps.projectTasks ? { projectTasks: trusted(req) && isLoopbackAddress(req.socket.remoteAddress) && sameProjectOrigin(req) && !deps.inDocker && !office.isDemo() } : {}),
         };
         sendJson(res, 200, access);
       }
@@ -518,6 +522,46 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       else if (!trusted(req) || (!deps.inDocker && !isLoopbackAddress(req.socket.remoteAddress))) {
         sendJson(res, 403, { error: denied(req, tr('eventos do Codex só são aceitos pelo próprio computador (http://localhost ou http://127.0.0.1)')) });
       } else handleCodexEvent(req, res, { live: deps.codexLive, entries: () => accounts.entriesOf('codex') }).catch((err) => fail(res, err));
+      return true;
+    }
+    if (path === '/api/project-tasks' || path.startsWith('/api/project-tasks/')) {
+      const tasks = deps.projectTasks;
+      if (!tasks || !trusted(req) || !isLoopbackAddress(req.socket.remoteAddress) || !sameProjectOrigin(req) || deps.inDocker || office.isDemo()) {
+        req.resume(); sendJson(res, 403, { error: 'Tarefas disponíveis apenas no escritório local, fora da demonstração.' });
+      } else {
+        const handle = async () => {
+          if (path === '/api/project-tasks' && isRead) return sendJson(res, 200, { tasks: await tasks.list() });
+          if (path === '/api/project-tasks' && method === 'POST') {
+            const raw = await readJson(req);
+            const projectId = (raw as { projectId?: unknown } | null)?.projectId;
+            const projectPath = typeof projectId === 'string' ? office.roomPath(projectId) : undefined;
+            if (!projectPath || typeof projectId !== 'string') throw new TaskError(400, 'Escolha um projeto do escritório.');
+            const task = await tasks.create({ id: projectId, path: projectPath }, raw);
+            office.registerProject(task.projectPath, task.createdAt);
+            return sendJson(res, 201, { task });
+          }
+          const match = /^\/api\/project-tasks\/([a-zA-Z0-9_-]{8,80})(?:\/(deliveries|reviews))?$/.exec(path);
+          if (match) {
+            const [, id, action] = match;
+            if (!action && method === 'PATCH') return sendJson(res, 200, { task: await tasks.update(id, await readJson(req)) });
+            if (action === 'deliveries' && isRead) {
+              const task = (await tasks.list()).find(t => t.id === id);
+              if (!task) throw new TaskError(404, 'Tarefa não encontrada.');
+              if (!deps.deliveries) throw new TaskError(503, 'O histórico de entregas está indisponível.');
+              const list = await deps.deliveries.list();
+              return sendJson(res, 200, { deliveries: list.filter(d => d.project && projectPathKey(d.project) === projectPathKey(task.projectPath)).map(taskDelivery) });
+            }
+            if (action === 'reviews' && method === 'POST') {
+              if (!deps.deliveries) throw new TaskError(503, 'O histórico de entregas está indisponível.');
+              return sendJson(res, 200, { task: await tasks.review(id, await readJson(req), () => deps.deliveries!.list()) });
+            }
+            return methodNotAllowed(res, action === 'deliveries' ? 'GET' : action === 'reviews' ? 'POST' : 'PATCH');
+          }
+          if (path === '/api/project-tasks') return methodNotAllowed(res, 'GET, POST');
+          sendJson(res, 404, { error: 'Rota não encontrada.' });
+        };
+        void handle().catch(error => error instanceof TaskError ? sendJson(res, error.status, { error: error.message }) : fail(res, error));
+      }
       return true;
     }
     if (path === '/api/projects' || path.startsWith('/api/projects/')) {

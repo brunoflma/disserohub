@@ -1,5 +1,4 @@
 import http from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -9,6 +8,7 @@ import { Office } from '../model/office';
 import { NameStore } from '../model/names';
 import { ProjectFolders } from '../projects/folders';
 import { tempDir } from '../test/fixtures';
+import { listenForFetch } from '../test/fetch-server';
 import { createApiHandler } from './app';
 import { createRequestGuard } from './guard';
 import { Hub } from './sse';
@@ -27,7 +27,8 @@ describe('cadastro local de projetos', () => {
     project = join(fixture.dir, 'Peças jurídicas');
     mkdirSync(project);
     writeFileSync(join(fixture.dir, 'arquivo.txt'), 'não é uma pasta');
-    projects = new ProjectFolders(join(fixture.dir, 'state', 'projects.json'), fixture.dir);
+    // This API fixture exercises its own directory, not every mounted drive on the host.
+    projects = new ProjectFolders(join(fixture.dir, 'state', 'projects.json'), fixture.dir, async () => [{ name: 'Fixture', path: fixture.dir }]);
     projects.load();
     remote = false;
     const office = new Office({ names: new NameStore(null), version: 'test', startedAt: Date.now(), accounts: () => [], sources: () => [], accountName: () => undefined });
@@ -40,8 +41,7 @@ describe('cadastro local de projetos', () => {
       if (guard(req, res)) return;
       if (!api(req, res, new URL(req.url ?? '/', 'http://localhost'))) { res.writeHead(404); res.end(); }
     });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    base = `http://127.0.0.1:${await listenForFetch(server)}`;
   });
 
   afterEach(async () => {

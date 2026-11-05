@@ -71,7 +71,7 @@ describe('ProjectFolders', () => {
     } finally {
       fixture.cleanup();
     }
-  });
+  }, process.platform === 'win32' ? 20_000 : 5_000);
 
   it('uses home when no path is provided and truncates large listings at 500 folders', async () => {
     const fixture = tempDir('habblaud-project-folders-');

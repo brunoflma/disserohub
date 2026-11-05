@@ -10,6 +10,29 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+## [1.0.3.10] - 2026-11-04
+
+### Central de trabalho
+
+- Visão dos projetos, fila de itens que precisam de atenção, modelos de tarefa e diagnóstico das integrações, preservando o escritório e os painéis existentes.
+- Tarefas persistentes por projeto, com responsável, prioridade, situação, critérios de aceite e dependências. As tarefas e suas salas permanecem disponíveis após encerrar sessões ou reiniciar o Dissero.
+- Revisão de entregas com aprovação, pedido de ajustes e histórico. A conclusão exige conferir os critérios de aceite e concluir as dependências; a revisão não envia comandos aos agentes.
+- Proteção contra alterações simultâneas em duas abas, gravação atômica e preservação dos rascunhos durante interrupções da conexão.
+
+### Ritmo de uso
+
+- Correção da contagem quando amostras de atividade vencem e alinhamento do limite de inatividade com o monitor Windows, mantendo separados os tempos pessoal e dos agentes.
+- O alerta de limite diário aparece mesmo quando também há um lembrete de pausa pendente.
+- Uma aba em primeiro plano deixa de consumir o aviso do sistema sem emiti-lo. Notificações também consideram a janela sem foco, com deduplicação entre abas.
+- Ativação das notificações pelo painel, com orientação sobre a permissão do navegador e a necessidade de manter a página aberta. Demonstração, reprodução e desconexão não exibem avisos pessoais.
+
+### Compatibilidade e validação
+
+- Correções para caminhos e links de entregas no Windows, preservando a proteção de diretórios e arquivos.
+- Testes com caminhos e permissões adequados ao sistema, portas aceitas pelo Fetch e prazos que distinguem a inicialização dos processos da espera funcional dos hooks.
+- Execução dos testes no Windows com dois workers de threads e isolamento mantido; comparações de pixels e transcrições mais eficientes.
+- Validação local com 1.643 testes aprovados, 18 testes condicionais ignorados e 30 cenários de navegador, além de checagem de tipos e build.
+
 ## [1.0.3.9] - 2026-10-26
 
 ### Projetos e início de tarefas
@@ -505,7 +528,8 @@ Primeira versão publicada.
   Subagentes chegam, trabalham e entregam ao principal. Mostra as duas contas, com o uso de 5 horas e semanal de
   cada uma (tap de statusline), além de feed de atividade, avisos e modo demonstração. Roda no Node ou no Docker local.
 
-[Não lançado]: https://github.com/marmottajr/habblaud/compare/v0.5.0...HEAD
+[Não lançado]: https://github.com/brunoflma/disserohub/compare/v1.0.3.10...HEAD
+[1.0.3.10]: https://github.com/brunoflma/disserohub/releases/tag/v1.0.3.10
 [0.5.0]: https://github.com/marmottajr/habblaud/releases/tag/v0.5.0
 [0.4.0]: https://github.com/marmottajr/habblaud/releases/tag/v0.4.0
 [0.3.2]: https://github.com/marmottajr/habblaud/releases/tag/v0.3.2

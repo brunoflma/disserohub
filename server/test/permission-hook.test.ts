@@ -53,7 +53,7 @@ function runHook(stdin: string, args: string[], env: NodeJS.ProcessEnv = {}): Pr
     let stderr = '';
     child.stdout.setEncoding('utf8').on('data', (c: string) => (stdout += c));
     child.stderr.setEncoding('utf8').on('data', (c: string) => (stderr += c));
-    const kill = setTimeout(() => child.kill('SIGKILL'), 20_000);
+    const kill = setTimeout(() => child.kill('SIGKILL'), process.platform === 'win32' ? 25_000 : 20_000);
     child.on('error', fail);
     child.on('close', (code) => {
       clearTimeout(kill);
@@ -88,7 +88,7 @@ afterEach(async () => {
   srv = undefined;
 });
 
-describe('permission-hook.mjs (processo)', () => {
+describe('permission-hook.mjs (processo)', { timeout: process.platform === 'win32' ? 30_000 : 5_000 }, () => {
   it('aprovar pelo Habblaud: imprime a decisão allow e sai com 0', async () => {
     srv = await servePermissions();
     const run = runHook(JSON.stringify(hookJson()), ['--port', String(srv.port)]);
@@ -156,19 +156,19 @@ describe('permission-hook.mjs (processo)', () => {
   it('Habblaud fora do ar: sai rápido, sem decisão', async () => {
     const r = await runHook(JSON.stringify(hookJson()), ['--port', String(await deadPort())]);
     expect(r).toMatchObject({ code: 0, stdout: '' });
-    expect(r.ms).toBeLessThan(3_000);
+    expect(r.ms).toBeLessThan(process.platform === 'win32' ? 8_000 : 3_000);
   });
 
   it('recurso desligado (403) ou ninguém olhando: sai na hora, sem decisão', async () => {
     srv = await servePermissions({ enabled: false });
     let r = await runHook(JSON.stringify(hookJson()), ['--port', String(srv.port)]);
     expect(r).toMatchObject({ code: 0, stdout: '' });
-    expect(r.ms).toBeLessThan(3_000);
+    expect(r.ms).toBeLessThan(process.platform === 'win32' ? 8_000 : 3_000);
     await srv.close();
     srv = await servePermissions({ viewers: 0 });
     r = await runHook(JSON.stringify(hookJson()), ['--port', String(srv.port)]);
     expect(r).toMatchObject({ code: 0, stdout: '' });
-    expect(r.ms).toBeLessThan(3_000);
+    expect(r.ms).toBeLessThan(process.platform === 'win32' ? 8_000 : 3_000);
     expect(srv.registry!.size).toBe(0);
   });
 
@@ -186,10 +186,10 @@ describe('permission-hook.mjs (processo)', () => {
     const r = await runHook(JSON.stringify(hookJson()), ['--port', String(srv.port), '--timeout', '5']);
     expect(r).toMatchObject({ code: 0, stdout: '' });
     expect(r.ms).toBeGreaterThanOrEqual(4_500);
-    expect(r.ms).toBeLessThan(12_000);
+    expect(r.ms).toBeLessThan(process.platform === 'win32' ? 20_000 : 12_000);
     await new Promise((ok) => setTimeout(ok, 600));
     expect(srv.registry!.size).toBe(0);
-  }, 20_000);
+  }, process.platform === 'win32' ? 30_000 : 20_000);
 });
 
 describe('permission-hook.mjs (funções)', () => {

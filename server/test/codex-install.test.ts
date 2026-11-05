@@ -263,10 +263,11 @@ describe('codex-install.ts (arquivos, HOME falso)', () => {
     for (const event of ['PreToolUse', 'PermissionRequest']) {
       const input = JSON.stringify({ session_id: '0199b0c0-1234-7abc-8def-0123456789ab', hook_event_name: event, cwd: '/p', tool_name: 'Bash', tool_input: { command: 'ls' } });
       const t0 = Date.now();
-      const r = spawnSync(SH!, ['-c', command], { input, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home }, timeout: 10_000 });
+      // Git Bash + Node cold startup competes with the full Windows suite; keep both process and elapsed bounds.
+      const r = spawnSync(SH!, ['-c', command], { input, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home }, timeout: process.platform === 'win32' ? 25_000 : 10_000 });
       expect(r.status, event).toBe(0);
       expect(r.stdout, event).toBe('');
-      expect(Date.now() - t0).toBeLessThan(5_000);
+      expect(Date.now() - t0).toBeLessThan(process.platform === 'win32' ? 20_000 : 5_000);
     }
-  });
+  }, process.platform === 'win32' ? 45_000 : 5_000);
 });

@@ -1,4 +1,6 @@
+import { join, win32 } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { tempDir } from '../test/fixtures';
 import { checkFile, DELIVERY_FILE_MAX_BYTES, fileType, insideKnownFolder, pathProblem } from './files';
 
 describe('arquivos das entregas', () => {
@@ -7,7 +9,11 @@ describe('arquivos das entregas', () => {
     expect(fileType('/a/b.pdf')?.kind).toBe('pdf');
     expect(fileType('/a/b.json')).toBeUndefined();
     expect(pathProblem('/Users/a/p/relatorio.pdf')).toBeUndefined();
+    expect(pathProblem(win32.join('C:\\', 'Users', 'a', 'p', 'relatorio.pdf'))).toBeUndefined();
     for (const bad of ['/Users/a/.ssh/x.png', '/Users/a/p/.env.png', '/Users/a/p/secret-plan.pdf', '/Users/a/p/server.key', '/Users/a/.aws/c.txt', '/Users/a/.habblaud/remote-tls/ca.pdf', 'rel.png', '/a/../b.png', '/a/b.sh', '/a/id_ed25519']) {
+      expect(pathProblem(bad), bad).toBeDefined();
+    }
+    for (const bad of [win32.join('C:\\', 'Users', 'a', '.ssh', 'x.png'), win32.join('C:\\', 'Users', 'a', 'p', '.env.png'), win32.join('C:\\', 'Users', 'a', 'id_ed25519'), win32.join('C:\\', 'Users', 'a', 'p', '..', 'secret.pdf')]) {
       expect(pathProblem(bad), bad).toBeDefined();
     }
   });
@@ -22,15 +28,33 @@ describe('arquivos das entregas', () => {
   });
 
   it('insideKnownFolder: só pastas de projeto que alguma conta conhece, as temporárias e os anexos', () => {
-    const known = new Set(['/h/.claude/projects/-Users-ana-loja', '/h/.claude-2/projects/-Users-ana-x-y']);
-    const opts = { accountDirs: ['/h/.claude', '/h/.claude-2'], roots: ['/tmp', '/h/.habblaud/attachments'], exists: (p: string) => known.has(p) };
-    expect(insideKnownFolder('/Users/ana/loja/docs/print.png', opts)).toBe(true);
-    expect(insideKnownFolder('/Users/ana/x-y/a.pdf', opts)).toBe(true);
-    expect(insideKnownFolder('/tmp/claude/scratch/tela.png', opts)).toBe(true);
-    expect(insideKnownFolder('/h/.habblaud/attachments/20261013-ab/foto.jpg', opts)).toBe(true);
-    // Fora dos projetos: o resto da pasta pessoal, outra pasta de projeto que ninguém usou e o próprio "/Users".
-    expect(insideKnownFolder('/Users/ana/Documents/extrato.pdf', opts)).toBe(false);
-    expect(insideKnownFolder('/Users/ana/lojas/a.png', opts)).toBe(false);
-    expect(insideKnownFolder('/tmpx/a.png', opts)).toBe(false);
+    const fixture = tempDir('habblaud-known-folders-');
+    try {
+      const accountDirs = [join(fixture.dir, 'home', '.claude'), join(fixture.dir, 'home', '.claude-2')];
+      const project = join(fixture.dir, 'Users', 'ana', 'loja');
+      const secondProject = join(fixture.dir, 'Users', 'ana', 'x-y');
+      const encode = (path: string) => path.replace(/[^a-zA-Z0-9]/g, '-');
+      const known = new Set([
+        join(accountDirs[0], 'projects', encode(project)),
+        join(accountDirs[1], 'projects', encode(secondProject)),
+      ]);
+      const tempRoot = join(fixture.dir, 'tmp');
+      const attachmentsRoot = join(fixture.dir, 'home', '.habblaud', 'attachments');
+      const opts = { accountDirs, roots: [tempRoot, attachmentsRoot], exists: (p: string) => known.has(p) };
+
+      expect(insideKnownFolder(join(project, 'docs', 'print.png'), opts)).toBe(true);
+      expect(insideKnownFolder(join(secondProject, 'a.pdf'), opts)).toBe(true);
+      expect(insideKnownFolder(join(tempRoot, 'claude', 'scratch', 'tela.png'), opts)).toBe(true);
+      expect(insideKnownFolder(join(attachmentsRoot, '20261013-ab', 'foto.jpg'), opts)).toBe(true);
+
+      // Pastas não cadastradas, raízes em si, traversal e irmãos com prefixo parecido seguem negados.
+      expect(insideKnownFolder(join(fixture.dir, 'Users', 'ana', 'Documents', 'extrato.pdf'), opts)).toBe(false);
+      expect(insideKnownFolder(join(fixture.dir, 'Users', 'ana', 'lojas', 'a.png'), opts)).toBe(false);
+      expect(insideKnownFolder(join(project, '..', 'loja-sibling', 'a.png'), opts)).toBe(false);
+      expect(insideKnownFolder(tempRoot, opts)).toBe(false);
+      expect(insideKnownFolder(join(tempRoot, '..', 'tmpx', 'a.png'), opts)).toBe(false);
+    } finally {
+      fixture.cleanup();
+    }
   });
 });

@@ -578,7 +578,10 @@ describe('pisos e paredes', () => {
     for (const k of floors) {
       const a = floorChunk(k, 2, -1, { seed: 3, tint: '#c9d1dc', tint2: '#bdc6d3' });
       expect(a.countOpaque(), k).toBe(CHUNK_PX * CHUNK_PX);
-      expect(floorChunk(k, 2, -1, { seed: 3, tint: '#c9d1dc', tint2: '#bdc6d3' }).data).toEqual(a.data);
+      const repeated = floorChunk(k, 2, -1, { seed: 3, tint: '#c9d1dc', tint2: '#bdc6d3' });
+      // Compare every byte without the generic deep-equality walk over millions of typed-array entries.
+      expect(repeated.data.length, k).toBe(a.data.length);
+      expect(repeated.data.every((value, index) => value === a.data[index]), k).toBe(true);
     }
   });
 

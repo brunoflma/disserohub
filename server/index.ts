@@ -26,6 +26,7 @@ import { NameStore } from './model/names';
 import { Office } from './model/office';
 import { RoomAliases } from './model/room-aliases';
 import { ProjectFolders } from './projects/folders';
+import { ProjectTaskStore } from './tasks/store';
 import { createPtyRoutes } from './http/pty';
 import { claudeBinFrom, isExecutableFile, loadPty, PtyManager, type ScreenFactory, type SpawnPty } from './pty/manager';
 import { loadHeadlessScreen } from './pty/screen';
@@ -133,6 +134,11 @@ if (codex) agents.add(codex);
 const codexLive: CodexLive | undefined = codex;
 late.office = office;
 for (const project of projects?.entries() ?? []) office.registerProject(project.path, project.createdAt);
+const projectTasks = config.terminal && !config.inDocker ? new ProjectTaskStore(join(config.dataDir, 'project-tasks.json')) : undefined;
+if (projectTasks) {
+  try { for (const task of await projectTasks.list()) office.registerProject(task.projectPath, task.createdAt); }
+  catch { log.warn('Tarefas salvas indisponíveis. O arquivo original foi preservado.'); }
+}
 late.agents = agents;
 // Página que pode responder pelo escritório: Host local na porta local; na remota, só com permissions liberado.
 const hub = new Hub(office, {
@@ -342,6 +348,7 @@ const api = createApiHandler({
   pty: ptys ? createPtyRoutes(ptys) : undefined,
   spawn,
   projects,
+  projectTasks,
   attachments,
   dictation,
   deliveries,
