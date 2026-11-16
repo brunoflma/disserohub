@@ -2,6 +2,7 @@
 // release com o texto dessa seção como notas (é o que o Habblaud abre em Configurações › Sobre › Ver o que mudou).
 //   npm run release                -> publica (precisa do gh autenticado)
 //   npm run release -- --dry-run   -> só confere e mostra as notas
+//   npm run release -- --check-ci  -> confere somente a elegibilidade CI da main remota, sem criar refs
 // Antes: revise a release oficial, alinhe package.json/shared/distribution.ts e os manifests, escreva o CHANGELOG
 // e faça o merge na main (docs/UPSTREAM-VERSIONING.md).
 import { execFileSync } from 'node:child_process';
@@ -11,6 +12,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DISSERO_REPOSITORY, distributionVersion, UPSTREAM_BASE_VERSION, UPSTREAM_REFERENCE_VERSION, UPSTREAM_REPOSITORY } from '../shared/distribution';
 import { parseGithubRepo } from '../server/updates/checker';
+import { checkCircleCi, type CiQuery } from './release-ci';
+export { assertSuccessfulCi } from './release-ci';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -39,25 +42,21 @@ export function assertVersionAlignment(pkg: ReleasePackage): void {
   }
 }
 
-export function assertSuccessfulCi(runs: { id: number; name: string; head_sha: string; status: string; conclusion: string | null }[], sha: string): void {
-  const latest = runs.filter((run) => run.name === 'CI' && run.head_sha === sha).sort((a, b) => b.id - a.id)[0];
-  if (!latest || latest.status !== 'completed' || latest.conclusion !== 'success') {
-    throw new Error('A publicação exige CI concluída com sucesso no commit exato da main.');
-  }
-}
-
 export interface ReleaseArgs {
   dryRun: boolean;
   help: boolean;
+  checkCi?: boolean;
 }
 
 export function parseReleaseArgs(argv: string[]): ReleaseArgs {
   const args: ReleaseArgs = { dryRun: false, help: false };
   for (const a of argv) {
     if (a === '--dry-run') args.dryRun = true;
+    else if (a === '--check-ci') args.checkCi = true;
     else if (a === '--help' || a === '-h') args.help = true;
     else throw new Error(`opção desconhecida: ${a}`);
   }
+  if (args.dryRun && args.checkCi) throw new Error('Use --dry-run ou --check-ci separadamente.');
   return args;
 }
 
@@ -105,7 +104,24 @@ export function unwrapMarkdown(text: string): string {
 }
 
 function run(cmd: string, args: string[], opts: { quiet?: boolean } = {}): string {
-  return execFileSync(cmd, args, { cwd: ROOT, encoding: 'utf8', stdio: opts.quiet ? ['ignore', 'pipe', 'ignore'] : ['ignore', 'pipe', 'inherit'] }).trim();
+  return execFileSync(cmd, cmd === 'git' ? ['--no-pager', ...args] : args, {
+    cwd: ROOT, encoding: 'utf8', timeout: 60_000, maxBuffer: 16 * 1024 * 1024,
+    env: { ...process.env, GIT_PAGER: 'cat', PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' },
+    stdio: opts.quiet ? ['ignore', 'pipe', 'ignore'] : ['ignore', 'pipe', 'inherit'],
+  }).trim();
+}
+
+/** CIRCLECI_CLI is an executable path only; credentials stay in the CLI's own store. */
+const ciQuery: CiQuery = (tool, args) => run(tool === 'circleci' ? (process.env.CIRCLECI_CLI || 'circleci') : 'gh', args, { quiet: true });
+
+export function remoteMainSha(output: string): string {
+  const match = /^([a-f0-9]{40})\trefs\/heads\/main$/.exec(output.trim());
+  if (!match) throw new Error('origin não retornou um único SHA completo para refs/heads/main.');
+  return match[1];
+}
+
+function readRemoteMain(): string {
+  return remoteMainSha(run('git', ['ls-remote', 'origin', 'refs/heads/main']));
 }
 
 function fail(msg: string): never {
@@ -121,12 +137,19 @@ function main(argv: string[]): void {
     fail((err as Error).message);
   }
   if (args.help) {
-    console.log('Uso: npm run release [-- --dry-run]\nPublica a versão do package.json no GitHub com as notas do CHANGELOG.md.');
+    console.log('Uso: npm run release [-- --dry-run | --check-ci]\n--check-ci consulta somente a CI da main remota, sem publicar nem criar refs.\nPublica a versão do package.json no GitHub com as notas do CHANGELOG.md.');
     return;
   }
 
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as ReleasePackage;
   assertReleaseTarget(pkg.repository, run('git', ['remote', 'get-url', 'origin']));
+  if (args.checkCi) {
+    const sha = readRemoteMain();
+    const proof = checkCircleCi(sha, ciQuery);
+    if (readRemoteMain() !== sha) fail('origin/main mudou durante a consulta de CI; obtenha uma prova nova.');
+    console.log(JSON.stringify({ mode: 'check-ci', ...proof, published: false }));
+    return;
+  }
   assertVersionAlignment(pkg);
   const version = distributionVersion(pkg);
   const tag = `v${version}`;
@@ -149,13 +172,13 @@ function main(argv: string[]): void {
 
   console.log(`Dissero ${tag}\n\n${notes}\n`);
   if (args.dryRun) {
-    console.log('(--dry-run: nada foi publicado)');
+    console.log('(--dry-run: nada foi publicado; CI não consultada. Use --check-ci para conferir a main remota.)');
     return;
   }
 
   const sha = run('git', ['rev-parse', 'HEAD']);
-  const ci = JSON.parse(run('gh', ['api', `repos/${DISSERO_REPOSITORY}/actions/runs?head_sha=${sha}&event=push&branch=main`])) as { workflow_runs: Parameters<typeof assertSuccessfulCi>[0] };
-  assertSuccessfulCi(ci.workflow_runs, sha);
+  checkCircleCi(sha, ciQuery);
+  if (readRemoteMain() !== sha) fail('origin/main mudou durante a verificação de CI; não crie uma tag com prova antiga.');
 
   const dir = mkdtempSync(join(tmpdir(), 'habblaud-release-'));
   try {
