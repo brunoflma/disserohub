@@ -76,7 +76,7 @@ npm test
 npm run build
 ```
 
-A CI executa essas verificações no Linux. Alguns testes originais dependem de permissões e caminhos Unix; execute a suíte completa no Linux ou WSL ao trabalhar no Windows.
+A CI executa essas verificações no Linux. A configuração CircleCI mantém Node.js 22.12 e limita o workflow a eventos de pull request e pushes para a `main`; os comandos estão na [verificação CircleCI](docs/ci-circleci.md). Alguns testes originais dependem de permissões e caminhos Unix; execute a suíte completa no Linux ou WSL ao trabalhar no Windows.
 
 Após revisar a release oficial, alinhe `package.json.version`, `disserohub.upstreamReferenceVersion` e `UPSTREAM_REFERENCE_VERSION` em `shared/distribution.ts`. Execute `node scripts/version-sync.mjs` para sincronizar os manifests das integrações locais herdadas do Habblaud. Escreva as notas no `CHANGELOG.md` e publique a partir da `main` limpa e sincronizada:
 
