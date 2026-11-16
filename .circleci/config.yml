@@ -56,6 +56,5 @@ jobs:
 
 workflows:
   verify_main_and_pull_requests:
-    when: pipeline.parameters.run_verify or pipeline.event.name == "pull_request" or (pipeline.event.name == "push" and pipeline.git.branch == "main")
     jobs:
       - verify
