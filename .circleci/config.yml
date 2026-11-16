@@ -1,0 +1,61 @@
+version: 2.1
+parameters:
+  run_verify:
+    type: boolean
+    default: false
+
+commands:
+  clear_checkout_credentials:
+    steps:
+      - run:
+          name: Remove checkout credentials before repository scripts
+          command: |
+            set -eu
+            git config --local --unset-all credential.helper >/dev/null 2>&1 || true
+            git config --local --unset-all http.https://github.com/.extraheader >/dev/null 2>&1 || true
+            git config --global --unset-all credential.helper >/dev/null 2>&1 || true
+            git config --global --unset-all http.https://github.com/.extraheader >/dev/null 2>&1 || true
+            rm -f "$HOME/.git-credentials"
+            if command -v ssh-add >/dev/null 2>&1; then
+              ssh-add -D >/dev/null 2>&1 || true
+            fi
+            origin_url="$(git remote get-url origin 2>/dev/null || true)"
+            case "$origin_url" in
+              https://*@*)
+                clean_origin_url="$(printf '%s\n' "$origin_url" | sed -E 's#^(https?://)[^/@]+@#\1#')"
+                git remote set-url origin "$clean_origin_url"
+                ;;
+            esac
+            cat >> "$BASH_ENV" \<<'EOF'
+            unset GIT_ASKPASS GIT_SSH GIT_SSH_COMMAND GH_TOKEN GITHUB_TOKEN
+            EOF
+
+jobs:
+  verify:
+    docker:
+      - image: cimg/node:22.12
+    resource_class: large
+    steps:
+      - checkout
+      - clear_checkout_credentials
+      - run:
+          name: Install dependencies
+          command: npm ci
+      - run:
+          name: Typecheck
+          command: npm run typecheck
+      - run:
+          name: Check onboarding capacity cases
+          command: node docs/onboarding/check-capacity-cases.mjs
+      - run:
+          name: Test
+          command: npm test -- --maxWorkers=2
+      - run:
+          name: Build
+          command: npm run build
+
+workflows:
+  verify_main_and_pull_requests:
+    when: pipeline.parameters.run_verify or pipeline.event.name == "pull_request" or (pipeline.event.name == "push" and pipeline.git.branch == "main")
+    jobs:
+      - verify
