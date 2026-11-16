@@ -34,6 +34,7 @@ jobs:
   verify:
     docker:
       - image: cimg/node:22.12
+    resource_class: large
     steps:
       - checkout
       - clear_checkout_credentials
@@ -48,7 +49,7 @@ jobs:
           command: node docs/onboarding/check-capacity-cases.mjs
       - run:
           name: Test
-          command: npm test
+          command: npm test -- --maxWorkers=2
       - run:
           name: Build
           command: npm run build
