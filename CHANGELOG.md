@@ -10,6 +10,8 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+- Guias de instalação nativa e Docker aceitam as revisões públicas de quatro números e conferem a tag pela versão pública, preservando a versão npm de três números.
+
 ## [1.0.3.11] - 2026-11-04
 
 - Removida da seção Sobre a explicação técnica da numeração e da base do Habblaud. A versão do Dissero, a verificação de atualizações e o instalador continuam disponíveis.
