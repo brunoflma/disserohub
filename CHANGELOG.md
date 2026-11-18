@@ -10,6 +10,8 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+## [1.0.3.12] - 2026-11-18
+
 - Guias de instalação nativa e Docker aceitam as revisões públicas de quatro números e conferem a tag pela versão pública, preservando a versão npm de três números.
 
 ## [1.0.3.11] - 2026-11-04
