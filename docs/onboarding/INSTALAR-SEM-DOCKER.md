@@ -41,9 +41,11 @@ Respeite permissões do sistema e pausas que dependam de mim, como senha adminis
 
 ## 3 Selecionar a release e compilar
 
-Consulte `https://api.github.com/repos/brunoflma/disserohub/releases/latest` ou o GitHub CLI já disponível. Exija uma release sem `draft` e sem `prerelease`, com tag estável `vX.Y.Z` e página pertencente ao DisseroHub. Não exija login no GitHub para baixar código público. Se a consulta falhar, peça uma tag estável publicada que eu possa confirmar; não use a `main` como alternativa.
+Consulte `https://api.github.com/repos/brunoflma/disserohub/releases/latest` ou o GitHub CLI já disponível. Exija uma release sem `draft` e sem `prerelease`, com tag estável `vX.Y.Z` ou `vX.Y.Z.N` (revisão própria do DisseroHub) e página pertencente ao DisseroHub. Não exija login no GitHub para baixar código público. Se a consulta falhar, peça uma tag estável publicada que eu possa confirmar; não use a `main` como alternativa.
 
-Na pasta nova, clone `https://github.com/brunoflma/disserohub.git`, busque a tag escolhida nessa origem e selecione-a em modo detached. Confirme a origem, registre o SHA completo do commit e compare a versão de `package.json` com a tag. Leia o README dessa release. Não use o upstream do Habblaud como fonte de instalação ou atualização.
+Na pasta nova, clone `https://github.com/brunoflma/disserohub.git`, busque a tag escolhida nessa origem e selecione-a em modo detached. Confirme a origem, registre o SHA completo do commit e valide a versão pública do manifesto conforme a regra abaixo. Leia o README dessa release. Não use o upstream do Habblaud como fonte de instalação ou atualização.
+
+A tag deve corresponder exatamente a `v` + `distributionVersion(package.json)`, não apenas a `package.json.version`. Conforme a [política de versionamento](../UPSTREAM-VERSIONING.md), a versão pública é `package.json.version` com `.N` acrescentado quando `disserohub.revision` é maior que zero; revisão ausente ou zero conserva três números. A revisão deve ser um inteiro entre 0 e 999999. Por exemplo, `version=1.0.3` e `disserohub.revision=11` correspondem a `v1.0.3.11`; revisão zero corresponde a `v1.0.3`. Não altere o manifesto para fazê-lo coincidir. Se a tag, a revisão ou a versão pública forem inválidas ou divergentes, pare antes de instalar dependências. Não aceite sufixos de pré-release como `-beta` nem tags com mais de quatro números.
 
 Execute na pasta selecionada, adaptando ao shell:
 
