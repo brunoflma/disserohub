@@ -87,6 +87,12 @@ npm run release
 
 O publicador exige números alinhados à referência revisada, base técnica coerente, `origin` e `package.json` apontando para este fork e CI bem-sucedida no commit exato. Todas as chamadas de publicação ao GitHub selecionam explicitamente o DisseroHub, inclusive quando o GitHub CLI usa o upstream como padrão de um fork.
 
+## Orientação para manutenção web
+
+A revisão das superfícies web usa [Modern Web Guidance](docs/modern-web-guidance.md)
+em modo consultivo, com escopo, compatibilidade e critérios de verificação
+próprios. Isso não instala ferramentas nem altera a distribuição do produto.
+
 ## Licença
 
 [MIT](LICENSE). Os avisos de licença e os créditos do Habblaud original são preservados.
